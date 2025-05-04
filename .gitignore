@@ -1,0 +1,6 @@
+# Log files
+*.log
+
+# Tools
+.idea/
+node_modules/
