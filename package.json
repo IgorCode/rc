@@ -1,0 +1,25 @@
+{
+  "name": "com.igorware.rc",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">= 24.0.0"
+  },
+  "scripts": {},
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
+    "@eslint/js": "^10.0.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "eslint-plugin-jsdoc": "~63.3.2",
+    "globals": "^17.7.0",
+    "grunt": "^1.6.3",
+    "grunt-contrib-uglify": "~5.2.2",
+    "grunt-contrib-watch": "~1.1.0",
+    "grunt-htmllint": "~0.3.0",
+    "grunt-jsonlint": "^3.0.0",
+    "grunt-notify": "~0.4.5",
+    "jit-grunt": "~0.10.0",
+    "time-grunt": "~2.0.0"
+  }
+}
