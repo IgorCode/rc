@@ -1,0 +1,22 @@
+﻿
+
+/* TEAM */
+  Human Worker:  Igor Jerosimić (Игор Јеросимић)
+       Contact:  https://igor.jerosimic.net/contact
+       Twitter:  @IgorJerosimic
+        GitHub:  https://github.com/IgorCode
+ StackOverflow:  https://stackoverflow.com/users/111433/igor-jerosimi%c4%87?tab=profile
+
+
+/* SITE */
+     Site name:  Modular RC
+      Site URL:  https://rc.igorware.com/
+     Standards:  HTML5, CSS3, ...
+
+
+/* THANKS */
+     - Danila Loginov because I learned from him what Bluetooth service to use
+       https://medium.com/@loginov_rocks/how-to-make-a-web-app-for-your-own-bluetooth-low-energy-device-arduino-2af8d16fdbe8
+     - Yoann Moinet for nipplejs (the Joystick control)
+       https://github.com/yoannmoinet/nipplejs
+     - Thanks to all visitors :)

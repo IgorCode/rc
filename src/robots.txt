@@ -1,0 +1,5 @@
+
+Sitemap: https://rc.igorware.com/sitemap.xml
+
+# Yandex
+Host: https://rc.igorware.com/
