@@ -1,0 +1,568 @@
+:root {
+  --cmd-background: #7397ab;  /* #cce6f4 */
+  --cmd-color: #fff;
+  --cmd-color-alt: #175676;
+  --display-background: #175676;
+  --display-color: #fafafa;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+    width: 100%;
+    height: 100%;
+  box-sizing: border-box;
+  font-size: 16px;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+}
+.column {
+  flex: 1;
+  min-width: 0;
+  padding: 1em;
+}
+@media screen and (orientation: portrait) {
+  .row {
+    flex-direction: column;
+  }
+}
+
+
+.icon {
+  width: 15px;
+  height: 100%;
+  fill: white;
+}
+
+
+/* Custom slider */
+.slider {
+  margin: .7em 0 0;
+  width: 100%;
+  height: 1em;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--cmd-background);
+  outline: none;
+}
+.slider::-webkit-slider-thumb {
+  margin-top: -.6em;
+  width: 2em;
+  height: 2em;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--cmd-color);
+  border: 3px solid var(--cmd-background);
+  cursor: pointer;
+}
+.slider::-moz-range-thumb {
+  width: 2em;
+  height: 2em;
+  background: var(--cmd-color);
+  border: 3px solid var(--cmd-color-alt);
+  cursor: pointer;
+}
+
+
+rc-app {
+  contain: strict;
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: 100%;
+}
+status-bar {
+  contain: content;
+  padding: .2em .5em;
+  background: #175676;
+  color: #fafafa;
+  line-height: 1.5;
+  z-index: 1000;
+}
+status-bar > .command {
+  float: right;
+  margin: 0 0 0 1em;
+  padding: 0;
+  width: 3em;
+  height: 1.8em;
+}
+status-bar > #command-toggle-terminal {
+  float: left;
+  margin-left: 0;
+  margin-right: 1em;
+}
+rc-app[data-status=disconnected] #command-toggle-connect {
+  background: #d62839;
+}
+rc-app[data-status=connected] #command-toggle-connect {
+  background: #28d656;
+}
+rc-app[data-active-screen=connect] #command-toggle-connect,
+rc-app[data-active-screen=terminal] #command-toggle-terminal {
+  /* opacity: .8; */
+  border-bottom: 2px solid black;
+}
+
+.todo {
+  opacity: .1;
+}
+
+
+/* Display */
+.display-wrapper {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  margin: 1em 1em 0;
+}
+.display {
+  padding: .5em;
+  min-width: 4em;
+  background: var(--display-background);
+  color: var(--display-color);
+  text-align: center;
+  user-select: none;
+}
+#display-direction {
+  min-width: 2em;
+}
+
+
+app-screens {
+  contain: content;
+  flex-grow: 1;
+  position: relative;
+}
+app-screen {
+  contain: strict;
+  display: none;
+  position: absolute;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: #fafafa;
+  box-sizing: border-box;
+}
+app-screen > screen-contents {
+  contain: strict;
+  display: block;
+  padding: .5em;
+  height: 100%;
+  width: 100%;
+    box-sizing: border-box;
+}
+
+
+/* Main screen */
+#screen-main {
+  display: block;
+  background: #fafafa;
+  z-index: 100;
+}
+#screen-main > screen-contents {
+  display: flex;
+  flex-direction: column;
+  padding: 0;  /* TODO: maybe update */
+}
+#screen-main > screen-contents > .row {
+  flex-grow: 1;
+}
+/* .direction-wrapper {
+  display: flex;
+    flex-direction: column;
+  max-width: 300px;
+}
+#joystick {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+#direction-marks {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: auto;
+  width: 240px;
+  height: 240px;
+  border-radius: 100%;
+}
+.direction-section {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+.direction-section-1 {
+  transform: rotate(-90deg);
+}
+.direction-section-2 {
+  transform: rotate(0deg);
+}
+.direction-section-3 {
+  transform: rotate(90deg);
+}
+.direction-section-4 {
+  transform: rotate(180deg);
+}
+.direction-section:before {
+  content: "";
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background-color: #cce6F4;
+  border-radius: 50%;
+  clip-path: polygon(1% 0px, 50% 50%, 99% 0);
+  animation: circle-quadrant 1s 1 forwards;
+}
+#direction-center {
+  background: #fafafa;
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  width: 130px;
+  height: 130px;
+  margin: auto;
+  border-radius: 50%;
+}
+#joystick .back {
+  background: none !important;
+}
+#joystick .back:before {
+  content: "+";
+  color: #175676;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: auto;
+  width: 1em;
+  height: 1em;
+  text-align: center;
+}
+#arrows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: auto;
+  width: 240px;
+  height: 240px;
+  border-radius: 100%;
+}
+.arrows-horizontal {
+  width: 100%;
+  height: 100%;
+  transform: rotate(90deg);
+}
+#arrows:before,
+.arrows-horizontal:before,
+#arrows:after,
+.arrows-horizontal:after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  margin: auto;
+  width: 0;
+  height: 0;
+  border-left: 1.4em solid transparent;
+  border-right: 1.4em solid transparent;
+}
+#arrows:before,
+.arrows-horizontal:before {
+  top: 20px;
+  border-bottom: 1em solid #175676;
+}
+#arrows:after,
+.arrows-horizontal:after {
+  bottom: 20px;
+  border-top: 1em solid #175676;
+} */
+
+.command-speed-picker {
+  display: flex;
+  flex-direction: row;
+  margin-bottom: 1em;
+}
+.command-speed-picker > .display {
+  min-width: 2em;
+  margin-right: 1em;
+}
+
+
+.command-direction {
+  display: flex;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.command-direction > button {
+  flex-grow: 1;
+  position: relative;
+  /* margin: .5em; */
+  background: var(--cmd-background);
+  border: none;
+  touch-action: none;
+}
+.command-direction > button:after {
+  content: "";
+  position: absolute;
+    top: 0;
+    bottom: 0;
+  left: 0;
+  right: 0;
+  margin: auto;
+  width: 0;
+  height: 0;
+}
+
+.command-direction-vertical {
+  flex-direction: column;
+  margin: .5em 0 .5em 1em;
+  width: 10em;
+  /* height: 100%; */
+}
+.command-direction-vertical > button {
+  margin-top: .5em;
+  margin-bottom: .5em;
+  padding: 0;
+  /* touch-action: pan-y; */
+}
+.command-direction-vertical > button:after {
+  border-left: 1.4em solid transparent;
+  border-right: 1.4em solid transparent;
+}
+#command-direction-forward:after {
+  bottom: 1em;
+  border-bottom: 2em solid var(--cmd-color);
+}
+#command-direction-backward:after {
+  top: 1em;
+  border-top: 2em solid var(--cmd-color);
+}
+
+.command-direction-horizontal {
+  flex-direction: row;
+  margin-bottom: 1em;
+  width: 100%;
+  height: 7em;
+}
+.command-direction-horizontal > button {
+  margin-left: 7px;
+  margin-right: 7px;
+  padding: 0;
+  /* touch-action: pan-x; */
+}
+.command-direction-horizontal > button:after {
+  border-top: 1.4em solid transparent;
+  border-bottom: 1.4em solid transparent;
+}
+#command-direction-left:after {
+  right: 1em;
+  border-right: 2em solid var(--cmd-color);
+}
+#command-direction-right:after {
+  left: 1em;
+  border-left: 2em solid var(--cmd-color);
+}
+
+
+#commands {
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: space-between;
+  margin-left: -7px;
+  margin-right: -7px;
+}
+.command {
+  margin: 0 7px 1em;
+  padding: .5em;
+  width: 40px;
+  height: 40px;
+  background: var(--cmd-background);
+  border: none;
+  box-sizing: border-box;
+  color: var(--cmd-color);
+}
+.command:focus {
+  outline: none;
+}
+.command-type-rgb {
+  padding: 3px;
+}
+/*@media screen and (orientation: portrait) {
+  #screen-main > .row {
+    flex-direction: column-reverse;
+  }
+  .direction-wrapper {
+    flex-grow: 1;
+    max-width: 100%;
+    max-height: 50%;
+  }
+  .command-speed-picker {
+    flex-direction: row;
+    flex-grow: 0;
+    max-width: 100%;
+    max-height: 34px;
+  }
+  #display-speed {
+    margin-bottom: 0;
+    margin-right: 1em;
+  }
+  .speed-picker-wrapper {
+    width: 100%;
+  }
+  #speed-picker {
+    -webkit-appearance: slider-horizontal;
+  }
+  .command-wrapper {
+    flex-grow: 0;
+  }
+}*/
+
+
+/* Error screen */
+#screen-error {
+  background: #d62839;
+  z-index: 999;
+}
+rc-app[data-active-screen=error] #screen-error {
+  display: block;
+}
+#command-close-error-screen {
+  float: right;
+  margin: 0 0 .5em .5em;
+}
+#error-message {
+  margin: .5em;
+  color: #fff;
+  font-size: 1.2em;
+}
+
+
+/* Connect screen */
+#screen-connect {
+  /* background: #cce6f4; */
+  z-index: 900;
+}
+rc-app[data-active-screen=connect] #screen-connect {
+  display: block;
+}
+#screen-connect > .row {
+  height: 100%;
+}
+#connect {
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #4ba3c3;
+  border: none;
+  color: #fff;
+  font-size: 3em;
+}
+@media (max-width: 640px) {
+  #connect {
+    font-size: 2em;
+  }
+}
+#connect > span {
+  display: none;
+}
+rc-app[data-status=disconnected] #connect > span[data-if-status=disconnected],
+rc-app[data-status=connecting] #connect > span[data-if-status=connecting],
+rc-app[data-status=connected] #connect > span[data-if-status=connected] {
+  display: inline;
+}
+rc-app[data-status=connecting] #connect > .spinner {
+  display: block;
+}
+
+
+/* Terminal screen */
+#screen-terminal {
+  background: #000;
+  z-index: 901;
+}
+rc-app[data-active-screen=terminal] #screen-terminal {
+  display: block;
+}
+#screen-terminal screen-contents {
+  display: flex;
+  flex-direction: column;
+}
+#app-log {
+  overflow: auto;
+  margin: 0;
+  padding-left: 1em;
+  height: 100%;
+  color: #fff;
+  font-family: monospace;
+  font-size: 14px;
+  list-style: square;
+}
+.custom-command-wrapper {
+  display: flex;
+  flex-direction: row;
+  padding-top: .6em;
+}
+#app-custom-command {
+  flex-grow: 1;
+  margin-right: .6em;
+  padding: 0 .4em;
+}
+#app-custom-command-send {
+  margin: 0;
+  padding: .5em .8em;
+  width: auto;
+  height: auto;
+}
+
+
+/* Animations */
+.spinner {
+  display: none;
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
+  margin: auto;
+  animation: 1s spin linear infinite;
+  background: transparent;
+  border-top: 4px solid #fff;
+  border-right: 4px solid transparent;
+  border-radius: 50%;
+}
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes circle-quadrant {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(180deg);
+  }
+}
