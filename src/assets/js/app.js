@@ -608,36 +608,70 @@ console.log(event.buttons);
     }
 
     /**
+     * Reject when a promise does not settle in time
+     * @param {Promise<*>} promise
+     * @param {number} ms
+     * @param {string} message
+     * @returns {Promise<*>}
+     */
+    function promiseTimeout(promise, ms, message)
+    {
+        let timer;
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(message)), ms);
+            }),
+        ]).finally(() => clearTimeout(timer));
+    }
+
+    /**
      * Bluetooth device connect
-     * @returns {void}
+     * @returns {Promise<void>}
      */
     async function bluetoothConnect()
     {
         addLogEntry('Connecting...');
-
-        // if (bluetoothDevice && bluetoothDevice.gatt && bluetoothDevice.gatt.connected) {
-        //     addLogEntry('Bluetooth device is already connected...');
-        //     return;
-        // }
-
         setConnectionState(CONNECTION_STATE.CONNECTING);
 
-        const connectPromise = (bluetoothDevice ? Promise.resolve(bluetoothDevice) : navigator.bluetooth.requestDevice({
-            filters: [{ services: [0xFFE0] }],
-            optionalServices: ["battery_service"],
-        })).then(device => {
-            bluetoothDevice = device;
-            bluetoothDevice.addEventListener('gattserverdisconnected', bluetoothOnDisconnected);
+        try {
+            // Reconnect to the same device if it exists, otherwise let the user pick one.
+            // The disconnect listener is only added once per device, so reconnects do not stack listeners.
+            if (!bluetoothDevice) {
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{services: [0xFFE0]}],
+                    optionalServices: ['battery_service'],
+                });
+                bluetoothDevice.addEventListener('gattserverdisconnected', bluetoothOnDisconnected);
+            }
             textBluetoothDeviceName.textContent = bluetoothDevice.name;
-            addLogEntry('Connecting to GATT server...');
-            return bluetoothDevice.gatt.connect();
-        });
 
-        // Timeout after 10 seconds
-        return Promise.race([
-            connectPromise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timeout')), BT_CONNECTION_TIMEOUT))
-        ]).catch(errorHandler);
+            // Timeout starts after the device is picked, so time spent in the picker does not count
+            addLogEntry('Connecting to GATT server...');
+            const server = await promiseTimeout(bluetoothDevice.gatt.connect(), BT_CONNECTION_TIMEOUT, 'Connection timeout');
+            addLogEntry('Connected to GATT server');
+
+            const service = await server.getPrimaryService(0xFFE0);
+            addLogEntry('Found primary service');
+
+            const characteristic = await service.getCharacteristic(0xFFE1);
+            addLogEntry('Found characteristic');
+
+            // startNotifications() throws when the characteristic has no notify property
+            if (characteristic.properties.notify) {
+                characteristic.addEventListener('characteristicvaluechanged', bluetoothCharacteristicValueChanged);
+                await characteristic.startNotifications();
+                addLogEntry('Notifications started');
+            } else {
+                addLogEntry('Characteristic does not support notifications');
+            }
+
+            bluetoothCharacteristic = characteristic;
+            setConnectionState(CONNECTION_STATE.CONNECTED);
+            screenShow(SCREEN.MAIN);
+        } catch (error) {
+            errorHandler(error);
+        }
 
         // // bluetoothDevice = await navigator.bluetooth.requestDevice({
         // //     filters: [{services: [0xFFE0]}],
@@ -732,6 +766,7 @@ console.log(event.buttons);
     {
         if (bluetoothCharacteristic) {
             bluetoothCharacteristic.removeEventListener('characteristicvaluechanged', bluetoothCharacteristicValueChanged);
+            bluetoothCharacteristic = null;
         }
 
         addLogEntry('Bluetooth device disconnected');
