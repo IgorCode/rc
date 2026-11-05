@@ -17,7 +17,9 @@ There are no npm scripts. Run Grunt through npx:
 - `npx grunt min` runs uglify only
 - `npx grunt watch` re-lints `Gruntfile.cjs` and `src/assets/js/**/*.js` when they change
 
-There is no test suite. To verify a change, load the page in Chrome with a BLE device, or use the in-app terminal screen to see sent and received traffic.
+There is no test suite. To verify a change, load the page in Chrome with a BLE device, or use the in-app terminal screen to see sent and received traffic. The connect flow logs each step (`Connected to GATT server`, `Found primary service`, `Found characteristic`, ...), so the last line shows where a failed connection stopped.
+
+`app.js` does not lint clean: ESLint reports 13 errors that were already there. Compare the error counts before and after a change instead of expecting a clean run.
 
 Gotchas in the Grunt config:
 - `uglify` only minifies `app.js` and `service-worker.js`, writing `*.min.js` next to them. `eslint:js` skips `*.min.js`. `index.php` loads `app.js`, not `app.min.js`.
@@ -44,14 +46,24 @@ Toolchain choices ported from `P:\+projects\extensions\common`. Do not "fix" the
 - `src/assets/js/app.js` holds all the logic in a single `DOMContentLoaded` closure:
   - **Screens**: the `data-active-screen` attribute on `<rc-app id="app">` (`main` / `connect` / `error` / `terminal`) controls which `<app-screen>` is visible through CSS. `screenShow()` redirects `main` to `connect` while there is no characteristic.
   - **Connection state**: the `data-status` attribute on `#app` (`disconnected` / `connecting` / `connected`) is shown or hidden through `[data-if-status]` spans.
-  - **BLE**: the app requests a device with service `0xFFE0` and writes to characteristic `0xFFE1` (HM-10 style serial module). `bluetoothSendCommand()` drops a command when one is already in flight (`bluetoothBusy`). The queue is still a TODO.
-  - **Wire protocol** (ASCII): the app sends single-character commands, or `cmd=<bytes>;` when there is a payload (for example the RGB color picker `4=` followed by 3 raw bytes). Drive states map to letters in `mapCommands` in `init()` (S F I R J B H L G). Speed is `1`–`9`, and `0` means 10. Incoming data is parsed as `KEY=value;` pairs, and keys `A` / `B` / `C` fill the `#display-1..3` fields.
+  - **BLE** (service `BT_SERVICE` = `0xFFE0`, HM-10 style serial layout): `bluetoothConnect()` picks a device filtered by that service, then connects, gets the service and command characteristic `0xFFE1`, sets `bluetoothCharacteristic`, switches to `connected` and shows `main`. The 10 s `promiseTimeout()` only wraps `gatt.connect()`, so time spent in the device picker does not count.
+    - `startNotifications()` on `0xFFE1` only runs when `characteristic.properties.notify` is set, because it throws otherwise. The current car firmware leaves NOTIFY off on `0xFFE1`, so the log shows `Characteristic does not support notifications` and the incoming `KEY=value;` path gets no data. This is expected.
+    - Front distance: characteristic `0xFFE2` (READ + NOTIFY) carries a uint16 little-endian value in cm, notified about every 200 ms. `400` (`DISTANCE_MAX`) means nothing in range. `bluetoothDistanceStart()` subscribes after the main connection is up and shows the value in `#display-2`. It catches its own errors, so a car without `0xFFE2` still connects. Distance values are not written to the terminal log, which would get about 5 entries per second.
+    - Car status: characteristic `0xFFE3` (READ + NOTIFY, 7 bytes) carries drive state, motor PWM, selected speed, flags (autopilot, front/rear light, horn) and battery mV / %. It is sent on every change and every 2 s. `statusParse()` reads it into `carStatus`, and `statusApply()` shows it. The car's status is the truth for display, because the car changes state on its own (safety stop, disconnect failsafe, autopilot). The direction display, the speed picker (except within `SPEED_SYNC_HOLD` after the user moves it) and the A/L/H pressed state (`aria-pressed`) all follow it. `cache.drive` / `cache.speed` still drive command de-duplication. Battery is shown in the status bar.
+    - Firmware version: characteristic `0xFFE4` (READ, ASCII, for example `1.1.0`) is shown after the device name in the status bar. The firmware bumps it whenever the BLE protocol changes.
+    - The version, status and distance characteristics are read one after another after the main connection, and each one is optional for older firmware.
+    - Reconnect: the `gattserverdisconnected` listener is added only when a device is first picked. An unexpected disconnect clears both characteristics and calls `bluetoothConnect()` again with the same device. A manual disconnect calls `reset()`.
+    - `bluetoothSendCommand()` drops a command when there is no characteristic or one is already in flight (`bluetoothBusy`). The queue is still a TODO.
+  - **Firmware**: the car side lives in `P:\+projects\arduino\car-black` (ESP32-C6). Its `bluetoothMapCommands()` in `command.ino` is the source of truth for command letters, and its `const.h` holds the UUIDs. The firmware is not part of this repo.
+  - **Wire protocol** (ASCII): the app sends single-character commands, or `cmd=<bytes>;` when there is a payload (for example the RGB color picker `4=` followed by 3 raw bytes). Drive states map to letters in `mapCommands` in `init()` (S F I R J B H L G), and these match the firmware. Speed is `1`–`9`, and `0` means 10. A/L/H are toggles: autopilot sends `X`/`x` and lights `W`/`w`, choosing on or off from the car status (or `cache.autopilot` / `cache.lights` without status). The horn sends `V` on press and `v` on release. The firmware tone has a fixed length, and releasing early stops it. Incoming data on `0xFFE1` is logged and parsed as `KEY=value;` pairs into `displayFields`, which is currently empty, so no keys fill a display. The display row is direction, `#display-1` (motor speed from the car status: `driveSpeed` as a percentage of `MOTOR_PWM_MAX` = 250) and `#display-2` (front distance).
   - **Direction**: four pointer-event buttons set `directionPressed`, and `directionCalculator()` combines them into a `DRIVE_STATE` (for example `F` + `R` gives `FR`).
 - `src/assets/js/service-worker.js` uses a network-first strategy with a cache fallback. `.htaccess` sets `Service-Worker-Allowed: /` so the worker can control the whole site.
 - `src/assets/vendor/` contains third-party libraries (gridstack, nipplejs). They are currently **unused**: their script tags and the joystick and grid code are commented out. Do not edit them.
 
 ## Current WIP state (be aware before "fixing")
 
-- `bluetoothConnect()` stops after `gatt.connect()`. Getting the service and characteristic (and starting notifications) only exists in the commented-out block below it, so `bluetoothCharacteristic` never gets set in the current code.
 - `init()` contains temporary test code that forces the `main` screen and logs `TESTING STUFF`. There are also debug `console.log` calls in the direction handlers and `bluetoothSendCommand`.
-- `src/assets/js/app.v1.js.bck` is an untracked backup of an older version, kept for reference.
+- `bluetoothConnect()` still contains the old commented-out connect code after its `catch`. It is dead and does nothing.
+- Known issues, not fixed yet:
+  - Clicking the color picker (`command-4`) sends `4` through the generic `#commands` click handler, which the firmware reads as speed 40%. The firmware has no RGB command (`HAS_LIGHT_RGB` is off).
+- `src/assets/js/app.v1.js.bck` is an untracked backup of a 2022 version, kept for reference. It is **not** the last working version: its command letters (`A`–`I`) are for older firmware. Do not use it to restore or "fix" current behavior.

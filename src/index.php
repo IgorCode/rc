@@ -80,14 +80,15 @@
                 <svg class="icon" width="14" height="14"><use xlink:href="/assets/img/app-icons.svg?#terminal"></use></svg>
             </button>
 
-            <button class="command todo" id="command-toggle-options">
-                <svg class="icon" width="14" height="14"><use xlink:href="/assets/img/app-icons.svg?#gear"></use></svg>
-            </button>
+            <span class="status-bar-title">Modular RC - <span id="bluetooth-device-name"></span><span id="firmware-version"></span></span>
+
+            <span id="bluetooth-battery"></span>
             <button class="command" id="command-toggle-connect">
                 <svg class="icon" width="14" height="14"><use xlink:href="/assets/img/app-icons.svg?#bluetooth"></use></svg>
             </button>
-
-            Modular RC - <span id="bluetooth-device-name"></span>
+            <button class="command todo" id="command-toggle-options">
+                <svg class="icon" width="14" height="14"><use xlink:href="/assets/img/app-icons.svg?#gear"></use></svg>
+            </button>
         </status-bar>
 
         <app-screens>
@@ -106,8 +107,6 @@
                         <div class="display" id="display-direction">—</div>
                         <div class="display" id="display-1">—</div>
                         <div class="display" id="display-2">—</div>
-                        <div class="display" id="display-3">—</div>
-                        <div class="display" id="display-4">—</div>
                     </div>
 
                     <div class="row">
@@ -151,9 +150,9 @@
                                     <button id="command-direction-right" aria-label="Direction right"></button>
                                 </command-direction>
 
-                                <button class="command" id="command-1">A</button>
-                                <button class="command" id="command-2">L</button>
-                                <button class="command" id="command-3">H</button>
+                                <button class="command" id="command-1" title="Autopilot" aria-label="Autopilot">A</button>
+                                <button class="command" id="command-2" title="Lights" aria-label="Lights">L</button>
+                                <button class="command" id="command-3" title="Horn (hold)" aria-label="Horn">H</button>
                                 <input type="color" class="command command-type-rgb" id="command-4" value="#ffffff" />
 
                                 <!-- <button class="command todo" id="command-5">—</button>
@@ -179,13 +178,15 @@
 
             <app-screen id="screen-connect">
                 <div class="row">
-                    <div class="column">
-                        <p>Press the big blue button to start the connection.</p>
-                        <p>
-                            NOTES:
-                            <br/>Web Bluetooth works only with Bluetooth v4
-                            <br/>Minimum Chrome v55
-                        </p>
+                    <div class="column connect-info">
+                        <p>Press the big blue button and pick your car from the list.</p>
+                        <p>Requirements:</p>
+                        <ul>
+                            <li>Chrome or Edge on Android, Windows, macOS or ChromeOS. Firefox, Safari and all browsers on iPhone and iPad do not support Web Bluetooth.</li>
+                            <li>A Bluetooth Low Energy (BLE) module in the car, such as HM-10 or ESP32. Classic Bluetooth modules (HC-05, HC-06) do not work.</li>
+                            <li>Bluetooth turned on. On Android 11 and older, Location must be on too.</li>
+                        </ul>
+                        <p>Controls: <b>A</b> autopilot, <b>L</b> lights, <b>H</b> horn (hold). If the connection drops, the app reconnects to the same car automatically.</p>
                     </div>
                     <div class="column">
                         <button id="connect">

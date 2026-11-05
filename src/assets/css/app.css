@@ -82,6 +82,8 @@ rc-app {
 }
 status-bar {
   contain: content;
+  display: flex;
+  align-items: center;
   padding: .2em .5em;
   background: #175676;
   color: #fafafa;
@@ -89,16 +91,30 @@ status-bar {
   z-index: 1000;
 }
 status-bar > .command {
-  float: right;
+  flex: none;
   margin: 0 0 0 1em;
   padding: 0;
   width: 3em;
   height: 1.8em;
 }
 status-bar > #command-toggle-terminal {
-  float: left;
-  margin-left: 0;
-  margin-right: 1em;
+  margin: 0 1em 0 0;
+}
+/* Takes the free space, which pushes the rest to the right; truncates on narrow screens */
+status-bar > .status-bar-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+status-bar > #bluetooth-battery {
+  flex: none;
+  margin-left: 1em;
+  white-space: nowrap;
+}
+status-bar > #bluetooth-battery:empty {
+  display: none;
 }
 rc-app[data-status=disconnected] #command-toggle-connect {
   background: #d62839;
@@ -402,6 +418,11 @@ app-screen > screen-contents {
 .command:focus {
   outline: none;
 }
+/* Toggle state reported by the car (autopilot, lights, horn) */
+.command[aria-pressed=true] {
+  background: var(--cmd-color-alt);
+  box-shadow: inset 0 0 0 2px var(--cmd-color);
+}
 .command-type-rgb {
   padding: 3px;
 }
@@ -465,6 +486,13 @@ rc-app[data-active-screen=connect] #screen-connect {
 }
 #screen-connect > .row {
   height: 100%;
+}
+/* The screen has a fixed height (half of it in portrait), so long text scrolls */
+#screen-connect .connect-info {
+  overflow-y: auto;
+}
+#screen-connect .connect-info ul {
+  padding-left: 1.2em;
 }
 #connect {
   overflow: hidden;

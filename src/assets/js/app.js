@@ -59,9 +59,56 @@ document.addEventListener('DOMContentLoaded', () => {
         FORWARD_LEFT: 'FL',
     });
 
+    /**
+     * Flag bits in the car status (byte 3 of the status characteristic)
+     * @readonly
+     * @enum {number}
+     */
+    const STATUS_FLAG = Object.freeze({
+        AUTOPILOT: 0x01,
+        LIGHT_FRONT: 0x02,
+        LIGHT_REAR: 0x04,
+        HORN: 0x08,
+    });
+
+    /**
+     * Car status as reported by the status characteristic
+     * @typedef {object} CarStatus
+     * @property {DriveStateType|'?'} drive Actual drive state, '?' when the value is unknown
+     * @property {number} driveSpeed Actual motor PWM, 0 when stopped
+     * @property {number} speed Selected speed level 1-10
+     * @property {number} flags STATUS_FLAG bits
+     * @property {number} batteryMv Battery voltage in mV, 0 means unknown
+     * @property {number} batteryPercent Battery estimate 0-100
+     */
 
     const
         BT_CONNECTION_TIMEOUT = 10000,
+        BT_SERVICE = 0xFFE0,
+        BT_CHARACTERISTIC_COMMAND = 0xFFE1,
+        BT_CHARACTERISTIC_DISTANCE = 0xFFE2,
+        BT_CHARACTERISTIC_STATUS = 0xFFE3,
+        BT_CHARACTERISTIC_VERSION = 0xFFE4,
+        DISTANCE_MAX = 400,
+        STATUS_LENGTH = 7,
+        // Status drive state values (index) as DRIVE_STATE
+        STATUS_DRIVE_STATES = Object.freeze([
+            DRIVE_STATE.STOP,
+            DRIVE_STATE.FORWARD,
+            DRIVE_STATE.BACKWARD,
+            DRIVE_STATE.LEFT,
+            DRIVE_STATE.RIGHT,
+            DRIVE_STATE.FORWARD_LEFT,
+            DRIVE_STATE.FORWARD_RIGHT,
+            DRIVE_STATE.BACKWARD_LEFT,
+            DRIVE_STATE.BACKWARD_RIGHT,
+        ]),
+        // Motor PWM of the speed levels 1-10, as reported in the status cruise speed
+        CRUISE_SPEEDS = Object.freeze([60, 90, 110, 130, 150, 170, 190, 210, 230, 250]),
+        // Highest motor PWM the firmware uses, shown as 100%
+        MOTOR_PWM_MAX = 250,
+        // Do not move the speed picker from the car status this long after the user moved it (ms)
+        SPEED_SYNC_HOLD = 1000,
         JOYSTICK_THRESHOLD = 0.3,
         SPEED_FROM_JOYSTICK = false,
         SPEED_RANGE_MIN = 1,
@@ -72,8 +119,12 @@ document.addEventListener('DOMContentLoaded', () => {
         appLog = document.getElementById('app-log'),
         errorMessage = document.getElementById('error-message'),
         textBluetoothDeviceName = document.getElementById('bluetooth-device-name'),
+        textBluetoothBattery = document.getElementById('bluetooth-battery'),
+        textFirmwareVersion = document.getElementById('firmware-version'),
         textDisplaySpeed = document.getElementById('display-speed'),
         textDisplayDirection = document.getElementById('display-direction'),
+        textDisplayDistance = document.getElementById('display-2'),
+        textDisplayMotor = document.getElementById('display-1'),
         inputCustomCommand = document.getElementById('app-custom-command'),
         btnConnect = document.getElementById('connect'),
         // ctrlJoystick = document.getElementById('joystick'),
@@ -81,11 +132,19 @@ document.addEventListener('DOMContentLoaded', () => {
         ctrlDirectionBackward = document.getElementById('command-direction-backward'),
         ctrlDirectionLeft = document.getElementById('command-direction-left'),
         ctrlDirectionRight = document.getElementById('command-direction-right'),
-        ctrlSpeedPicker = document.getElementById('speed-picker')
+        ctrlSpeedPicker = document.getElementById('speed-picker'),
+        ctrlAutopilot = document.getElementById('command-1'),
+        ctrlLights = document.getElementById('command-2'),
+        ctrlHorn = document.getElementById('command-3')
     ;
 
     let bluetoothDevice,
         bluetoothCharacteristic,
+        bluetoothDistanceCharacteristic,
+        bluetoothStatusCharacteristic,
+        /** @type {CarStatus|null} */
+        carStatus = null,
+        speedInputAt = 0,
         bluetoothBusy = false,
         commandQueue = [],
         isManualDisconnect = false,
@@ -95,15 +154,16 @@ document.addEventListener('DOMContentLoaded', () => {
         //     error: document.getElementById('screen-error'),
         //     terminal: document.getElementById('screen-terminal'),
         // },
-        displayFields = {
-            A: document.getElementById('display-1'),
-            B: document.getElementById('display-2'),
-            C: document.getElementById('display-3'),
-        },
+        // Displays filled from incoming `KEY=value;` data on the command characteristic, by key.
+        // None are mapped: #display-1 shows the motor speed and #display-2 the front distance from the car status.
+        displayFields = {},
         mapCommands = {},
         cache = {
             speed: 1,
             drive: DRIVE_STATE.STOP,
+            // Last toggle state the app sent, only used when the car does not report its status
+            autopilot: false,
+            lights: false,
         };
 
 
@@ -269,11 +329,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         bluetoothDevice = null;
         bluetoothCharacteristic = null;
+        bluetoothDistanceCharacteristic = null;
+        bluetoothStatusCharacteristic = null;
         bluetoothBusy = false;
         isManualDisconnect = false;
+        // The firmware failsafe turns autopilot off when the controller disconnects
+        cache.autopilot = false;
 
-        textDirectionUpdate();
-        textSpeedUpdate();
+        statusApply(null);
+        textDistanceUpdate(null);
+        textFirmwareVersion.textContent = '';
     }
 
     /**
@@ -293,9 +358,12 @@ document.addEventListener('DOMContentLoaded', () => {
         mapCommands[DRIVE_STATE.BACKWARD_LEFT]  = 'H';
         mapCommands[DRIVE_STATE.LEFT]           = 'L';
         mapCommands[DRIVE_STATE.FORWARD_LEFT]   = 'G';
-        mapCommands['command-1']                = '1';
-        mapCommands['command-2']                = '2';
-        mapCommands['command-3']                = '3';
+        mapCommands['autopilot-on']             = 'X';
+        mapCommands['autopilot-off']            = 'x';
+        mapCommands['lights-on']                = 'W';
+        mapCommands['lights-off']               = 'w';
+        mapCommands['horn-on']                  = 'V';
+        mapCommands['horn-off']                 = 'v';
         mapCommands['command-4']                = '4';
 
 
@@ -315,7 +383,127 @@ addLogEntry('TESTING STUFF');
      */
     function textDirectionUpdate()
     {
-        textDisplayDirection.textContent = cache.drive;
+        // The car can change state on its own (safety stop, failsafe, autopilot), so its status wins
+        textDisplayDirection.textContent = carStatus ? carStatus.drive : cache.drive;
+    }
+
+    /**
+     * Update motor speed text: actual motor PWM as a percentage of MOTOR_PWM_MAX, 0% when stopped
+     * @returns {void}
+     */
+    function textMotorUpdate()
+    {
+        if (carStatus) {
+            textDisplayMotor.textContent = Math.round(carStatus.driveSpeed / MOTOR_PWM_MAX * 100) + '%';
+        } else {
+            textDisplayMotor.textContent = '—';
+        }
+    }
+
+    /**
+     * Update battery text in the status bar
+     * @returns {void}
+     */
+    function textBatteryUpdate()
+    {
+        if (carStatus && carStatus.batteryMv > 0) {
+            textBluetoothBattery.textContent = carStatus.batteryPercent + '% (' + (carStatus.batteryMv / 1000).toFixed(2) + ' V)';
+        } else {
+            textBluetoothBattery.textContent = '';
+        }
+    }
+
+    /**
+     * Set the pressed state of a toggle button, null means unknown
+     * @param {HTMLElement} el
+     * @param {boolean|null} pressed
+     * @returns {void}
+     */
+    function setPressed(el, pressed)
+    {
+        if (pressed === null) {
+            el.removeAttribute('aria-pressed');
+        } else {
+            el.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+        }
+    }
+
+    /**
+     * Update the autopilot, lights and horn buttons from the car status flags
+     * @returns {void}
+     */
+    function commandFlagsUpdate()
+    {
+        if (!carStatus) {
+            setPressed(ctrlAutopilot, null);
+            setPressed(ctrlLights, null);
+            setPressed(ctrlHorn, null);
+            return;
+        }
+
+        const flags = carStatus.flags;
+        setPressed(ctrlAutopilot, (flags & STATUS_FLAG.AUTOPILOT) !== 0);
+        setPressed(ctrlLights, (flags & (STATUS_FLAG.LIGHT_FRONT | STATUS_FLAG.LIGHT_REAR)) !== 0);
+        setPressed(ctrlHorn, (flags & STATUS_FLAG.HORN) !== 0);
+    }
+
+    /**
+     * Convert the status cruise speed (motor PWM) to the closest speed level 1-10
+     * @param {number} pwm
+     * @returns {number}
+     */
+    function cruiseSpeedToLevel(pwm)
+    {
+        let level = 1;
+        CRUISE_SPEEDS.forEach((speed, index) => {
+            if (Math.abs(speed - pwm) < Math.abs(CRUISE_SPEEDS[level - 1] - pwm)) {
+                level = index + 1;
+            }
+        });
+        return level;
+    }
+
+    /**
+     * Parse the status characteristic value
+     * @param {DataView} value
+     * @returns {CarStatus|null} null when the value is too short
+     */
+    function statusParse(value)
+    {
+        if (value.byteLength < STATUS_LENGTH) {
+            return null;
+        }
+
+        return {
+            drive: STATUS_DRIVE_STATES[value.getUint8(0)] ?? '?',
+            driveSpeed: value.getUint8(1),
+            speed: cruiseSpeedToLevel(value.getUint8(2)),
+            flags: value.getUint8(3),
+            batteryMv: value.getUint16(4, true),
+            batteryPercent: value.getUint8(6),
+        };
+    }
+
+    /**
+     * Show the car status, null clears it and falls back to the last sent commands
+     * @param {CarStatus|null} status
+     * @returns {void}
+     */
+    function statusApply(status)
+    {
+        carStatus = status;
+
+        // Follow the car's selected speed, unless the user is moving the picker right now
+        if (status && status.speed !== cache.speed && Date.now() - speedInputAt >= SPEED_SYNC_HOLD) {
+            cache.speed = status.speed;
+            ctrlSpeedPicker.value = status.speed;
+        }
+
+        textDirectionUpdate();
+        textSpeedUpdate();
+        textMotorUpdate();
+        textBatteryUpdate();
+        commandFlagsUpdate();
     }
 
     /**
@@ -325,6 +513,22 @@ addLogEntry('TESTING STUFF');
     function textSpeedUpdate()
     {
         textDisplaySpeed.textContent = cache.speed;
+    }
+
+    /**
+     * Update front distance text
+     * @param {number|null} cm Distance in cm, DISTANCE_MAX means nothing in range, null means no data
+     * @returns {void}
+     */
+    function textDistanceUpdate(cm)
+    {
+        if (cm === null) {
+            textDisplayDistance.textContent = '—';
+        } else if (cm >= DISTANCE_MAX) {
+            textDisplayDistance.textContent = DISTANCE_MAX + '+ cm';
+        } else {
+            textDisplayDistance.textContent = cm + ' cm';
+        }
     }
 
     /**
@@ -346,6 +550,9 @@ addLogEntry('TESTING STUFF');
             textSpeedUpdate();
         }
     }, 150, false);
+    ctrlSpeedPicker.addEventListener('input', () => {
+        speedInputAt = Date.now();
+    });
     ctrlSpeedPicker.addEventListener('input', cmdUpdateSpeedDebounced);
 
     /**
@@ -488,7 +695,8 @@ console.log(event.buttons);
 
     function directionCalculator()
     {
-        let direction = DRIVE_STATE.STOP;
+        // Start empty, not with STOP, otherwise left alone would become 'SL', which has no command
+        let direction = '';
         if (directionPressed.forward) {
             direction = DRIVE_STATE.FORWARD;
         } else if (directionPressed.backward) {
@@ -499,6 +707,10 @@ console.log(event.buttons);
             direction += DRIVE_STATE.LEFT;
         } else if (directionPressed.right) {
             direction += DRIVE_STATE.RIGHT;
+        }
+
+        if (direction === '') {
+            direction = DRIVE_STATE.STOP;
         }
 
         setDriveState(direction);
@@ -569,7 +781,57 @@ console.log(event.buttons);
      * @returns {void}
      */
     document.getElementById('commands').addEventListener('click', (event) => {
-        bluetoothSendCommand(mapCommands[event.target.id]);
+        // Only buttons with a direct mapping, the toggles and direction buttons have their own handlers
+        if (event.target.id in mapCommands) {
+            bluetoothSendCommand(mapCommands[event.target.id]);
+        }
+    });
+
+    /**
+     * Whether a car toggle is on: the car status when known, otherwise the last state the app sent
+     * @param {number} flagMask STATUS_FLAG bits, any of them set counts as on
+     * @param {'autopilot'|'lights'} cacheKey
+     * @returns {boolean}
+     */
+    function toggleIsOn(flagMask, cacheKey)
+    {
+        if (carStatus) {
+            return (carStatus.flags & flagMask) !== 0;
+        }
+        return cache[cacheKey];
+    }
+
+    /**
+     * Autopilot toggle
+     * @returns {void}
+     */
+    ctrlAutopilot.addEventListener('click', () => {
+        cache.autopilot = !toggleIsOn(STATUS_FLAG.AUTOPILOT, 'autopilot');
+        bluetoothSendCommand(mapCommands[cache.autopilot ? 'autopilot-on' : 'autopilot-off']);
+    });
+
+    /**
+     * Lights toggle (front and rear switch together in the firmware)
+     * @returns {void}
+     */
+    ctrlLights.addEventListener('click', () => {
+        cache.lights = !toggleIsOn(STATUS_FLAG.LIGHT_FRONT | STATUS_FLAG.LIGHT_REAR, 'lights');
+        bluetoothSendCommand(mapCommands[cache.lights ? 'lights-on' : 'lights-off']);
+    });
+
+    /**
+     * Horn sounds while the button is held. The firmware tone has a fixed length,
+     * releasing early stops it.
+     * @returns {void}
+     */
+    bindEvt(ctrlHorn, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        bluetoothSendCommand(mapCommands['horn-on']);
+    }, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        bluetoothSendCommand(mapCommands['horn-off']);
     });
     document.getElementById('command-4').addEventListener('input', (event) => {
         const hexColor = event.target.value;
@@ -608,6 +870,103 @@ console.log(event.buttons);
     }
 
     /**
+     * Receive front distance via Bluetooth (uint16 little-endian, cm)
+     * NOTE: Notified about every 200 ms, so it is not written to the terminal log
+     * @param {object} event
+     * @returns {void}
+     */
+    function bluetoothDistanceValueChanged(event)
+    {
+        textDistanceUpdate(event.target.value.getUint16(0, true));
+    }
+
+    /**
+     * Subscribe to front distance notifications. Older firmware does not have
+     * this characteristic, so a failure is logged and does not fail the connection.
+     * @param {BluetoothRemoteGATTService} service
+     * @returns {Promise<void>}
+     */
+    async function bluetoothDistanceStart(service)
+    {
+        try {
+            const characteristic = await service.getCharacteristic(BT_CHARACTERISTIC_DISTANCE);
+            characteristic.addEventListener('characteristicvaluechanged', bluetoothDistanceValueChanged);
+            bluetoothDistanceCharacteristic = characteristic;
+
+            const initial = await characteristic.readValue();
+            textDistanceUpdate(initial.getUint16(0, true));
+
+            await characteristic.startNotifications();
+            addLogEntry('Distance notifications started');
+        } catch (error) {
+            errorLogger('Distance sensor not available: ' + error);
+        }
+    }
+
+    /**
+     * Receive car status via Bluetooth
+     * NOTE: Sent on every change and every 2 s, so it is not written to the terminal log
+     * @param {object} event
+     * @returns {void}
+     */
+    function bluetoothStatusValueChanged(event)
+    {
+        const status = statusParse(event.target.value);
+        if (status) {
+            statusApply(status);
+        } else {
+            errorLogger('Invalid car status length: ' + event.target.value.byteLength);
+        }
+    }
+
+    /**
+     * Subscribe to car status notifications. Older firmware does not have
+     * this characteristic, so a failure is logged and does not fail the connection.
+     * @param {BluetoothRemoteGATTService} service
+     * @returns {Promise<void>}
+     */
+    async function bluetoothStatusStart(service)
+    {
+        try {
+            const characteristic = await service.getCharacteristic(BT_CHARACTERISTIC_STATUS);
+            characteristic.addEventListener('characteristicvaluechanged', bluetoothStatusValueChanged);
+            bluetoothStatusCharacteristic = characteristic;
+
+            const status = statusParse(await characteristic.readValue());
+            if (status) {
+                statusApply(status);
+            }
+
+            await characteristic.startNotifications();
+            addLogEntry('Status notifications started');
+        } catch (error) {
+            errorLogger('Car status not available: ' + error);
+        }
+    }
+
+    /**
+     * Read the firmware version. Older firmware does not have
+     * this characteristic, so a failure is logged and does not fail the connection.
+     * @param {BluetoothRemoteGATTService} service
+     * @returns {Promise<void>}
+     */
+    async function bluetoothVersionRead(service)
+    {
+        try {
+            const characteristic = await service.getCharacteristic(BT_CHARACTERISTIC_VERSION);
+            const value = await characteristic.readValue();
+            // Cut at the first NUL in case the firmware pads the string
+            const text = new TextDecoder().decode(value);
+            const version = text.split('\0')[0].trim();
+
+            textFirmwareVersion.textContent = version ? ' · v' + version : '';
+            addLogEntry('Firmware version ' + version);
+        } catch (error) {
+            errorLogger('Firmware version not available: ' + error);
+        }
+    }
+
+    /**
      * Reject when a promise does not settle in time
      * @param {Promise<*>} promise
      * @param {number} ms
@@ -639,7 +998,7 @@ console.log(event.buttons);
             // The disconnect listener is only added once per device, so reconnects do not stack listeners.
             if (!bluetoothDevice) {
                 bluetoothDevice = await navigator.bluetooth.requestDevice({
-                    filters: [{services: [0xFFE0]}],
+                    filters: [{services: [BT_SERVICE]}],
                     optionalServices: ['battery_service'],
                 });
                 bluetoothDevice.addEventListener('gattserverdisconnected', bluetoothOnDisconnected);
@@ -651,10 +1010,10 @@ console.log(event.buttons);
             const server = await promiseTimeout(bluetoothDevice.gatt.connect(), BT_CONNECTION_TIMEOUT, 'Connection timeout');
             addLogEntry('Connected to GATT server');
 
-            const service = await server.getPrimaryService(0xFFE0);
+            const service = await server.getPrimaryService(BT_SERVICE);
             addLogEntry('Found primary service');
 
-            const characteristic = await service.getCharacteristic(0xFFE1);
+            const characteristic = await service.getCharacteristic(BT_CHARACTERISTIC_COMMAND);
             addLogEntry('Found characteristic');
 
             // startNotifications() throws when the characteristic has no notify property
@@ -669,6 +1028,12 @@ console.log(event.buttons);
             bluetoothCharacteristic = characteristic;
             setConnectionState(CONNECTION_STATE.CONNECTED);
             screenShow(SCREEN.MAIN);
+
+            // Optional, missing characteristics (older firmware) do not fail the connection.
+            // Run one after another, GATT operations are not reliable in parallel.
+            await bluetoothVersionRead(service);
+            await bluetoothStatusStart(service);
+            await bluetoothDistanceStart(service);
         } catch (error) {
             errorHandler(error);
         }
@@ -768,6 +1133,19 @@ console.log(event.buttons);
             bluetoothCharacteristic.removeEventListener('characteristicvaluechanged', bluetoothCharacteristicValueChanged);
             bluetoothCharacteristic = null;
         }
+        if (bluetoothDistanceCharacteristic) {
+            bluetoothDistanceCharacteristic.removeEventListener('characteristicvaluechanged', bluetoothDistanceValueChanged);
+            bluetoothDistanceCharacteristic = null;
+        }
+        if (bluetoothStatusCharacteristic) {
+            bluetoothStatusCharacteristic.removeEventListener('characteristicvaluechanged', bluetoothStatusValueChanged);
+            bluetoothStatusCharacteristic = null;
+        }
+        // The firmware failsafe turns autopilot off when the controller disconnects
+        cache.autopilot = false;
+        statusApply(null);
+        textDistanceUpdate(null);
+        textFirmwareVersion.textContent = '';
 
         addLogEntry('Bluetooth device disconnected');
 
