@@ -4,17 +4,17 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">= 24.0.0"
+    "node": ">= 24.15.0"
   },
   "scripts": {
     "test": "node --test \"tests/**/*.test.js\""
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.3.5",
+    "@eslint/eslintrc": "^3.3.7",
     "@eslint/js": "^10.0.1",
-    "@stylistic/eslint-plugin": "^5.10.0",
-    "eslint-plugin-jsdoc": "~63.3.2",
-    "globals": "^17.7.0",
+    "@stylistic/eslint-plugin": "^6.0.0",
+    "eslint-plugin-jsdoc": "~65.4.7",
+    "globals": "^17.14.0",
     "grunt": "^1.6.3",
     "grunt-contrib-uglify": "~5.2.2",
     "grunt-contrib-watch": "~1.1.0",
@@ -22,6 +22,6 @@
     "grunt-jsonlint": "^3.0.0",
     "grunt-notify": "~0.4.5",
     "jit-grunt": "~0.10.0",
-    "time-grunt": "~2.0.0"
+    "time-grunt": "1.4.0"
   }
 }
