@@ -68,7 +68,6 @@ export default [
 
 
             // stylistic
-            "@stylistic/array-bracket-spacing": ["error", "never"],
             "@stylistic/comma-style": ["error", "last"],
             "@stylistic/comma-spacing": ["error", {
                 before: false,
@@ -88,7 +87,22 @@ export default [
             "@stylistic/object-curly-newline": ["off", {
                 multiline: true,
             }],
-            "@stylistic/object-curly-spacing": ["error", "never"],
+            // Replaces array-bracket-spacing and object-curly-spacing ("never"), deprecated in @stylistic 6.
+            // Only [] and {} are checked, like the old rules; parentheses and <> are left alone.
+            "@stylistic/list-style": ["error", {
+                singleLine: {
+                    spacing: "never",
+                },
+                overrides: {
+                    "{}": {
+                        singleLine: {
+                            spacing: "never",
+                        },
+                    },
+                    "()": "off",
+                    "<>": "off",
+                },
+            }],
             "@stylistic/one-var-declaration-per-line": ["error", "always"],
             "@stylistic/semi": ["error", "always"],
             "@stylistic/semi-spacing": ["error", {
