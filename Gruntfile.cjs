@@ -39,6 +39,9 @@ module.exports = function (grunt)
                     '<%= dirs.assets %>/js/**/*.js',
                     '!<%= dirs.assets %>/js/**/*.min.js'
                 ]
+            },
+            tests: {
+                src: 'tests/**/*.js'
             }
         },
         htmllint: {
@@ -69,8 +72,8 @@ module.exports = function (grunt)
                 expand: true,
                 cwd: '<%= dirs.assets %>/js/',
                 src: [
-                    'app.js',
-                    'service-worker.js'
+                    '**/*.js',
+                    '!**/*.min.js'
                 ],
                 dest: '<%= dirs.assets %>/js/',
                 ext: '.min.js'
