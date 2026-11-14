@@ -224,8 +224,19 @@
 
     <!-- <script src="/assets/vendor/nipplejs/0.8.5/nipplejs.min.js"></script> -->
     <!-- <script src="/assets/vendor/gridstack.js/1.1.1/gridstack.min.js"></script> -->
-    <?php $dateJS = date('YmdHis', filemtime('assets/js/app.js')); ?>
-    <script src="/assets/js/app-<?= $dateJS; ?>.js"></script>
+    <?php
+    // Cache busting for ES modules: imports use plain URLs (./bluetooth.js), so the import map
+    // sends each one to its timestamped URL, which .htaccess rewrites back to the real file
+    $jsImports = [];
+    foreach (glob('assets/js/*.js') as $jsFile) {
+        if (preg_match('/\.min\.js$/', $jsFile) || basename($jsFile) === 'service-worker.js') {
+            continue;
+        }
+        $jsImports['/' . $jsFile] = '/' . substr($jsFile, 0, -3) . '-' . date('YmdHis', filemtime($jsFile)) . '.js';
+    }
+    ?>
+    <script type="importmap"><?= json_encode(['imports' => $jsImports], JSON_UNESCAPED_SLASHES); ?></script>
+    <script type="module" src="<?= $jsImports['/assets/js/app.js']; ?>"></script>
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-8MG5MVTBQX"></script>
     <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-8MG5MVTBQX');</script>

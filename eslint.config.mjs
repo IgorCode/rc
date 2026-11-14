@@ -18,6 +18,7 @@ export default [
     {
         ignores: [
             "node_modules/*",
+            "**/*.min.js",
         ],
     },
     ...compat.extends("eslint:recommended"),
@@ -125,6 +126,24 @@ export default [
                 ...globals.node,
             },
             sourceType: "commonjs",
+        },
+    },
+    {
+        // App code is native ES modules (always strict, so no 'use strict').
+        // The service worker is still a classic script.
+        files: ["src/assets/js/**/*.js"],
+        ignores: ["src/assets/js/service-worker.js"],
+        languageOptions: {
+            sourceType: "module",
+        },
+    },
+    {
+        files: ["tests/**/*.js"],
+        languageOptions: {
+            globals: {
+                ...globals.node,
+            },
+            sourceType: "module",
         },
     }
 ];
