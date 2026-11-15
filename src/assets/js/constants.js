@@ -132,6 +132,12 @@ export const
     MOTOR_PWM_MAX = 250,
     // Do not move the speed picker from the car status this long after the user moved it (ms)
     SPEED_SYNC_HOLD = 1000,
+    // Car watchdog (car-black#32): the car stops a manual drive this long after the last drive command,
+    // and the horn this long after the last V (ms)
+    WATCHDOG_DRIVE_TIMEOUT = 500,
+    WATCHDOG_HORN_TIMEOUT = 1000,
+    // While a direction or the horn is held, its command is resent this many times per watchdog timeout
+    KEEPALIVE_RESENDS = 3,
     // Joystick, used by the commented-out joystick code in controls.js
     JOYSTICK_THRESHOLD = 0.3,
     SPEED_FROM_JOYSTICK = false,

@@ -4,7 +4,15 @@
  * and the terminal's custom command. Keeps what the app sent (`cache`) and what the car reports
  * (`carStatus`), because the car can change state on its own.
  */
-import {COMMAND, DRIVE_STATE, SPEED_SYNC_HOLD, STATUS_FLAG} from './constants.js';
+import {
+    COMMAND,
+    DRIVE_STATE,
+    KEEPALIVE_RESENDS,
+    SPEED_SYNC_HOLD,
+    STATUS_FLAG,
+    WATCHDOG_DRIVE_TIMEOUT,
+    WATCHDOG_HORN_TIMEOUT,
+} from './constants.js';
 import {bluetoothSendCommand} from './bluetooth.js';
 import {uiShowDirection, uiShowSpeed} from './ui.js';
 
@@ -28,6 +36,7 @@ const directionPressed = {
 
 /** @type {CarStatus|null} */
 let carStatus = null,
+    hornHeld = false,
     speedInputAt = 0,
     inputCustomCommand = null,
     // ctrlJoystick = null,
@@ -72,6 +81,58 @@ function debounce(func, wait, immediate)
         }
     };
 }
+
+/**
+ * Resend interval that keeps a held command alive within a watchdog timeout
+ * @param {number} timeout Watchdog timeout (ms)
+ * @returns {number} ms
+ */
+export function keepalivePeriod(timeout)
+{
+    return Math.floor(timeout / KEEPALIVE_RESENDS);
+}
+
+/**
+ * Keepalive for a held command: calls `send` every `period` ms between start() and stop().
+ * The car firmware (car-black#32) stops driving and the horn when their command is not repeated.
+ * @param {function(): void} send
+ * @param {number} period ms
+ * @returns {{start: function(): void, stop: function(): void, isRunning: function(): boolean}}
+ */
+export function keepaliveCreate(send, period)
+{
+    let timer = null;
+
+    return {
+        start() {
+            if (timer === null) {
+                timer = setInterval(send, period);
+            }
+        },
+        stop() {
+            if (timer !== null) {
+                clearInterval(timer);
+                timer = null;
+            }
+        },
+        isRunning() {
+            return timer !== null;
+        },
+    };
+}
+
+// Resend the held drive state. Autopilot is exempt from the watchdog and overrides manual drive anyway.
+// Repeats are not logged: they would add about 6 terminal entries per second.
+const driveKeepalive = keepaliveCreate(() => {
+    if (cache.drive !== DRIVE_STATE.STOP && !toggleIsOn(STATUS_FLAG.AUTOPILOT, 'autopilot')) {
+        bluetoothSendCommand(COMMAND[cache.drive], undefined, false);
+    }
+}, keepalivePeriod(WATCHDOG_DRIVE_TIMEOUT));
+
+// Resend V while the horn is held. A repeated V keeps the tone going, it does not restart it.
+const hornKeepalive = keepaliveCreate(() => {
+    bluetoothSendCommand(COMMAND['horn-on'], undefined, false);
+}, keepalivePeriod(WATCHDOG_HORN_TIMEOUT));
 
 /**
  * Show the direction: the car's status when known, otherwise the last sent drive state.
@@ -119,6 +180,50 @@ export function controlsReset()
 {
     // The firmware failsafe turns autopilot off when the controller disconnects
     cache.autopilot = false;
+    // A held button must be pressed again after a reconnect, so the car does not drive off on its own
+    controlsReleaseAll();
+}
+
+/**
+ * Release all held controls (directions and horn): sends the stop and horn-off commands
+ * and stops their keepalive
+ * @returns {void}
+ */
+export function controlsReleaseAll()
+{
+    directionPressed.forward = false;
+    directionPressed.backward = false;
+    directionPressed.left = false;
+    directionPressed.right = false;
+    directionCalculator();
+    hornRelease();
+}
+
+/**
+ * Horn pressed: sound it and keep it alive while held
+ * @returns {void}
+ */
+function hornPress()
+{
+    hornHeld = true;
+    bluetoothSendCommand(COMMAND['horn-on']);
+    hornKeepalive.start();
+}
+
+/**
+ * Horn released: stop repeating V and send v, which stops the horn right away. If v is lost, the
+ * car's watchdog still stops the horn WATCHDOG_HORN_TIMEOUT after the last V.
+ * Does nothing when the horn is not held, because several events can end one hold.
+ * @returns {void}
+ */
+function hornRelease()
+{
+    if (!hornHeld) {
+        return;
+    }
+    hornHeld = false;
+    hornKeepalive.stop();
+    bluetoothSendCommand(COMMAND['horn-off']);
 }
 
 /**
@@ -153,6 +258,12 @@ function setDriveState(state)
         bluetoothSendCommand(COMMAND[state]);
 
         textDirectionUpdate();
+    }
+
+    if (state === DRIVE_STATE.STOP) {
+        driveKeepalive.stop();
+    } else {
+        driveKeepalive.start();
     }
 }
 
@@ -197,7 +308,9 @@ function directionCalculator()
 }
 
 /**
- * Bind press and release handlers to a hold button
+ * Bind press and release handlers to a hold button. The pointer is captured, so a finger or mouse
+ * that slides off the button still releases it. The release handler can run more than once for
+ * one press (pointerup, then lostpointercapture), so it must not depend on running once.
  * @param {HTMLElement} el
  * @param {function(PointerEvent): void} handleStart
  * @param {function(PointerEvent): void} handleEnd
@@ -205,9 +318,17 @@ function directionCalculator()
  */
 function bindEvt(el, handleStart, handleEnd)
 {
-    el.addEventListener('pointerdown', handleStart, false);
+    el.addEventListener('pointerdown', (e) => {
+        try {
+            el.setPointerCapture(e.pointerId);
+        } catch {
+            // The pointer is already gone, its pointerup / pointercancel still releases the button
+        }
+        handleStart(e);
+    }, false);
     el.addEventListener('pointerup', handleEnd, false);
     el.addEventListener('pointercancel', handleEnd, false);
+    el.addEventListener('lostpointercapture', handleEnd, false);
 }
 
 /**
@@ -364,18 +485,30 @@ console.log(event.buttons);
     });
 
     /**
-     * Horn sounds while the button is held. The firmware tone has a fixed length,
-     * releasing early stops it.
+     * Horn sounds while the button is held: V is repeated while held (watchdog keepalive),
+     * and v on release stops it.
      * @returns {void}
      */
     bindEvt(ctrlHorn, function (e) {
         e.preventDefault();
         e.stopPropagation();
-        bluetoothSendCommand(COMMAND['horn-on']);
+        hornPress();
     }, function (e) {
         e.preventDefault();
         e.stopPropagation();
-        bluetoothSendCommand(COMMAND['horn-off']);
+        hornRelease();
+    });
+
+    /**
+     * Release everything when the app loses focus or is hidden: the release events may never
+     * arrive, the keepalive would keep the car driving, and hidden tabs throttle the timers.
+     * @returns {void}
+     */
+    window.addEventListener('blur', controlsReleaseAll);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            controlsReleaseAll();
+        }
     });
 
     /**
