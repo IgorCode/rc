@@ -14,6 +14,8 @@ const cache = {
     // Last toggle state the app sent, only used when the car does not report its status
     autopilot: false,
     lights: false,
+    // On after a car boot
+    obstacleStop: true,
 };
 
 const directionPressed = {
@@ -35,7 +37,8 @@ let carStatus = null,
     ctrlSpeedPicker = null,
     ctrlAutopilot = null,
     ctrlLights = null,
-    ctrlHorn = null;
+    ctrlHorn = null,
+    ctrlObstacleStop = null;
 
 /**
  * Returns a function, that, as long as it continues to be invoked, will not
@@ -208,7 +211,7 @@ function bindEvt(el, handleStart, handleEnd)
 /**
  * Whether a car toggle is on: the car status when known, otherwise the last state the app sent
  * @param {number} flagMask STATUS_FLAG bits, any of them set counts as on
- * @param {'autopilot'|'lights'} cacheKey
+ * @param {'autopilot'|'lights'|'obstacleStop'} cacheKey
  * @returns {boolean}
  */
 function toggleIsOn(flagMask, cacheKey)
@@ -235,6 +238,7 @@ export function controlsInit()
     ctrlAutopilot = document.getElementById('command-1');
     ctrlLights = document.getElementById('command-2');
     ctrlHorn = document.getElementById('command-3');
+    ctrlObstacleStop = document.getElementById('command-obstacle-stop');
 
     ctrlSpeedPicker.addEventListener('input', () => {
         speedInputAt = Date.now();
@@ -369,6 +373,16 @@ console.log(event.buttons);
         e.preventDefault();
         e.stopPropagation();
         bluetoothSendCommand(COMMAND['horn-off']);
+    });
+
+    /**
+     * Obstacle stop toggle: the forward safety stop for manual driving (autopilot always keeps it).
+     * Needs the car firmware from car-black#28, older firmware ignores C / c.
+     * @returns {void}
+     */
+    ctrlObstacleStop.addEventListener('click', () => {
+        cache.obstacleStop = !toggleIsOn(STATUS_FLAG.OBSTACLE_STOP, 'obstacleStop');
+        bluetoothSendCommand(COMMAND[cache.obstacleStop ? 'obstacle-stop-on' : 'obstacle-stop-off']);
     });
     document.getElementById('command-4').addEventListener('input', (event) => {
         const hexColor = event.target.value;
