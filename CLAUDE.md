@@ -24,7 +24,7 @@ GitHub Actions (`.github/workflows/test.yml`) runs `npm ci` and `npm test` on No
 
 Tests only cover the DOM-free logic (manifest download / CRC / cache / validation / grid layout / status decoding, version parsing, direction combining, command encoding, the command queue, the keepalive timer, display formatting). Anything touching Bluetooth or the page still needs Chrome with the car, or the in-app terminal screen to see sent and received traffic. The connect flow logs each step (`Connected to GATT server`, `Found primary service`, `Found characteristic`, ...), so the last line shows where a failed connection stopped.
 
-The app modules do not lint clean: ESLint reports 7 errors that were already there before the module split, all from the WIP code listed at the bottom (unindented temporary/debug lines, the `nipplejs` global for the commented-out joystick). Compare error counts before and after a change instead of expecting a clean run. `tests/` lints clean.
+The app modules do not lint clean: ESLint reports 2 errors in `controls.js` that were already there before the module split, both from the WIP code listed at the bottom (the unindented start of the commented-out direction-click block, the `nipplejs` global for the commented-out joystick). Compare error counts before and after a change instead of expecting a clean run. `tests/` lints clean.
 
 Gotchas in the Grunt config:
 - `uglify` minifies every `.js` in `src/assets/js` (except `*.min.js`), writing `*.min.js` next to them. A minified build is planned for later: `index.php` still loads the unminified files, and the minified modules import their siblings by unminified name, so switching needs the import map to point at the `.min.js` files. `eslint` skips `*.min.js`.
@@ -86,7 +86,6 @@ Toolchain choices ported from `P:\+projects\extensions\common`. Do not "fix" the
 ## Current WIP state (be aware before "fixing")
 
 - **Keep the commented-out code** (old connect chain in `bluetooth.js`, joystick and direction-click blocks in `controls.js`, the joystick / placeholder buttons comment in `index.php`, the `screens` map in `ui.js`): parts of it will be needed later. Do not delete it as dead code.
-- `init()` in `app.js` contains temporary test code that forces the `main` screen and logs `TESTING STUFF`.
 - `danger` (Mad Max) only adds a red bar (`.cell-danger`); no confirm or long press yet.
 - Known issues, not fixed yet:
   - While autopilot is on, the firmware overrides manual drive commands, and only `x` turns autopilot off.

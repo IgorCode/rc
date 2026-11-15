@@ -3,7 +3,7 @@
  * Loaded as a module script, which runs after the document is parsed.
  */
 import {CONNECTION_STATE, SCREEN} from './constants.js';
-import {addLogEntry, errorLogger, logInit} from './log.js';
+import {errorLogger, logInit} from './log.js';
 import {bluetoothEvents, bluetoothReset, bluetoothToggleConnection} from './bluetooth.js';
 import {controlsInit, controlsRender, controlsReset, controlsSetValues} from './controls.js';
 import {manifestValidate} from './manifest.js';
@@ -129,14 +129,6 @@ function init()
     // Until a car connects, show the layout of firmware without a manifest
     manifestApply(manifestValidate(MANIFEST_LEGACY));
     reset();
-
-
-// TODO: temporary
-// setConnectionState(CONNECTION_STATE.CONNECTED);
-// screenShow('main');
-document.getElementById('app').setAttribute('data-active-screen', 'main');
-addLogEntry('TESTING STUFF');
-
 }
 
 
