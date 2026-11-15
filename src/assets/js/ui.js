@@ -1,8 +1,9 @@
 /**
- * Screens, displays, status bar and button pressed state. Only shows what it is given,
- * the state lives in bluetooth.js and controls.js.
+ * Screens, status bar, connect screen help and the display formatting. Only shows what it is
+ * given, the state lives in bluetooth.js and controls.js. The controller cells are built by
+ * controls.js from the manifest and use the format*() helpers here.
  */
-import {CONNECTION_STATE, DISTANCE_MAX, MOTOR_PWM_MAX, SCREEN, STATUS_FLAG} from './constants.js';
+import {CONNECTION_STATE, SCREEN} from './constants.js';
 import {bluetoothIsConnected} from './bluetooth.js';
 import {logScrollToEnd} from './log.js';
 
@@ -11,20 +12,8 @@ let app = null,
     textBluetoothDeviceName = null,
     textBluetoothBattery = null,
     textFirmwareVersion = null,
-    textDisplaySpeed = null,
-    textDisplayDirection = null,
-    textDisplayDistance = null,
-    textDisplayMotor = null,
+    textControlsHelp = null,
     btnConnect = null,
-    ctrlAutopilot = null,
-    ctrlLights = null,
-    ctrlHorn = null,
-    ctrlObstacleStop = null,
-    ctrlMadMax = null,
-    speedPicker = null,
-    // Last selected speed level, and whether Mad Max overrides it (the car then drives at full speed)
-    speedLevel = 1,
-    speedOverridden = false,
 
     // screens = {
     //     connect: document.getElementById('screen-connect'),
@@ -32,7 +21,7 @@ let app = null,
     //     terminal: document.getElementById('screen-terminal'),
     // },
     // Displays filled from incoming `KEY=value;` data on the command characteristic, by key.
-    // None are mapped: #display-1 shows the motor speed and #display-2 the front distance from the car status.
+    // None are mapped: the displays show the status values the manifest describes.
     displayFields = {};
 
 /**
@@ -46,17 +35,8 @@ export function uiInit()
     textBluetoothDeviceName = document.getElementById('bluetooth-device-name');
     textBluetoothBattery = document.getElementById('bluetooth-battery');
     textFirmwareVersion = document.getElementById('firmware-version');
-    textDisplaySpeed = document.getElementById('display-speed');
-    textDisplayDirection = document.getElementById('display-direction');
-    textDisplayDistance = document.getElementById('display-2');
-    textDisplayMotor = document.getElementById('display-1');
+    textControlsHelp = document.getElementById('controls-help');
     btnConnect = document.getElementById('connect');
-    ctrlAutopilot = document.getElementById('command-1');
-    ctrlLights = document.getElementById('command-2');
-    ctrlHorn = document.getElementById('command-3');
-    ctrlObstacleStop = document.getElementById('command-obstacle-stop');
-    ctrlMadMax = document.getElementById('command-mad-max');
-    speedPicker = document.querySelector('.command-speed-picker');
 
     /**
      * Close error screen
@@ -158,19 +138,9 @@ export function uiShowVersion(version)
 }
 
 /**
- * Update direction text
- * @param {DriveStateType|'?'} drive
- * @returns {void}
- */
-export function uiShowDirection(drive)
-{
-    textDisplayDirection.textContent = drive;
-}
-
-/**
  * Format the speed display
- * @param {number} level Selected speed level 1-10
- * @param {boolean} overridden Mad Max is on, so the car drives at full speed whatever is selected
+ * @param {number} level Selected speed level, 1 is the slowest
+ * @param {boolean} overridden Another control (Mad Max) overrides the selection, so the car drives at full speed
  * @returns {string}
  */
 export function formatSpeed(level, overridden)
@@ -179,133 +149,110 @@ export function formatSpeed(level, overridden)
 }
 
 /**
- * Show the speed display, and dim the speed picker while Mad Max overrides it.
- * The picker stays usable: the car stores the selection and uses it once Mad Max is off.
- * @returns {void}
- */
-function speedRender()
-{
-    textDisplaySpeed.textContent = formatSpeed(speedLevel, speedOverridden);
-    speedPicker.classList.toggle('speed-overridden', speedOverridden);
-}
-
-/**
- * Update speed text
- * @param {number} level Speed level 1-10
- * @returns {void}
- */
-export function uiShowSpeed(level)
-{
-    speedLevel = level;
-    speedRender();
-}
-
-/**
- * Format the front distance
- * @param {number|null} cm Distance in cm, DISTANCE_MAX means nothing in range, null means no data
+ * Unit after a value: `%` right after it, other units after a space
+ * @param {string} [unit]
  * @returns {string}
  */
-export function formatDistance(cm)
+function unitSuffix(unit)
 {
-    if (cm === null) {
-        return '—';
-    }
-    if (cm >= DISTANCE_MAX) {
-        return DISTANCE_MAX + '+ cm';
-    }
-    return cm + ' cm';
-}
-
-/**
- * Format the motor speed: actual motor PWM as a percentage of MOTOR_PWM_MAX, 0% when stopped
- * @param {CarStatus|null} status
- * @returns {string}
- */
-export function formatMotor(status)
-{
-    if (!status) {
-        return '—';
-    }
-    return Math.round(status.driveSpeed / MOTOR_PWM_MAX * 100) + '%';
-}
-
-/**
- * Format the battery for the status bar
- * @param {CarStatus|null} status
- * @returns {string} empty when unknown
- */
-export function formatBattery(status)
-{
-    if (!status || status.batteryMv <= 0) {
+    if (!unit) {
         return '';
     }
-    return status.batteryPercent + '% (' + (status.batteryMv / 1000).toFixed(2) + ' V)';
+    return unit === '%' ? unit : ' ' + unit;
 }
 
 /**
- * Update front distance text
- * @param {number|null} cm Distance in cm, DISTANCE_MAX means nothing in range, null means no data
- * @returns {void}
+ * Format a status value for a display cell
+ * - no value: a dash
+ * - bit: On / Off, enum: its name
+ * - `none` (the sentinel): a dash, for the front distance `400+ cm` (nothing in range)
+ * - `max`: a percentage of it (motor PWM 250 is 100%)
+ * - otherwise the number and its unit
+ * @param {StatusDescriptor} descriptor
+ * @param {number|boolean|string|undefined|null} value
+ * @returns {string}
  */
-export function uiShowDistance(cm)
+export function formatStatusValue(descriptor, value)
 {
-    textDisplayDistance.textContent = formatDistance(cm);
-}
-
-/**
- * Set the pressed state of a toggle button, null means unknown
- * @param {HTMLElement} el
- * @param {boolean|null} pressed
- * @returns {void}
- */
-function setPressed(el, pressed)
-{
-    if (pressed === null) {
-        el.removeAttribute('aria-pressed');
-    } else {
-        el.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+    if (value === undefined || value === null) {
+        return '—';
     }
+    if (typeof value === 'boolean') {
+        return value ? 'On' : 'Off';
+    }
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (descriptor.none !== undefined && value >= descriptor.none) {
+        return descriptor.id === 'distance' ? descriptor.none + '+' + unitSuffix(descriptor.unit) : '—';
+    }
+    if (descriptor.max > 0) {
+        return Math.round(value / descriptor.max * 100) + '%';
+    }
+    return value + unitSuffix(descriptor.unit);
 }
 
 /**
- * Update the autopilot, lights, horn, obstacle stop and Mad Max buttons from the car status flags
- * @param {CarStatus|null} status
+ * Format the battery for the status bar, from the `battery` (mV) and `batteryPct` values
+ * @param {{[key: string]: *}|null} values
+ * @returns {string} empty when unknown
+ */
+export function formatBattery(values)
+{
+    if (!values || !(values.battery > 0)) {
+        return '';
+    }
+    const volts = (values.battery / 1000).toFixed(2) + ' V';
+    return typeof values.batteryPct === 'number' ? values.batteryPct + '% (' + volts + ')' : volts;
+}
+
+/**
+ * Show the battery in the status bar
+ * @param {{[key: string]: *}|null} values Status values by id, null clears it
  * @returns {void}
  */
-function commandFlagsUpdate(status)
+export function uiShowBattery(values)
 {
-    if (!status) {
-        setPressed(ctrlAutopilot, null);
-        setPressed(ctrlLights, null);
-        setPressed(ctrlHorn, null);
-        setPressed(ctrlObstacleStop, null);
-        setPressed(ctrlMadMax, null);
+    textBluetoothBattery.textContent = formatBattery(values);
+}
+
+/**
+ * Controls help for the connect screen: the buttons of the manifest, in grid order
+ * @param {Manifest} manifest
+ * @returns {Array<{label: string, text: string}>}
+ */
+export function controlsHelpItems(manifest)
+{
+    const types = ['button', 'hold', 'toggle', 'color'];
+    return manifest.layout.areas
+        .map(area => manifest.cells[area.key])
+        .filter(cell => types.includes(cell.type) && cell.title)
+        .map(cell => ({
+            label: cell.label ?? cell.key,
+            text: cell.type === 'hold' && !/hold/i.test(cell.title) ? cell.title + ' (hold)' : cell.title,
+        }));
+}
+
+/**
+ * Show the controls help on the connect screen
+ * @param {Manifest} manifest
+ * @returns {void}
+ */
+export function uiShowControlsHelp(manifest)
+{
+    const items = controlsHelpItems(manifest);
+    textControlsHelp.replaceChildren();
+    if (items.length === 0) {
         return;
     }
 
-    const flags = status.flags;
-    setPressed(ctrlAutopilot, (flags & STATUS_FLAG.AUTOPILOT) !== 0);
-    setPressed(ctrlLights, (flags & (STATUS_FLAG.LIGHT_FRONT | STATUS_FLAG.LIGHT_REAR)) !== 0);
-    setPressed(ctrlHorn, (flags & STATUS_FLAG.HORN) !== 0);
-    setPressed(ctrlObstacleStop, (flags & STATUS_FLAG.OBSTACLE_STOP) !== 0);
-    setPressed(ctrlMadMax, (flags & STATUS_FLAG.MAD_MAX) !== 0);
-}
-
-/**
- * Show the parts of the car status that only the car knows: motor speed, battery, toggle flags
- * and the Mad Max speed override. Direction and the selected speed are shown by controls.js,
- * which falls back to the last sent commands.
- * @param {CarStatus|null} status null clears it
- * @returns {void}
- */
-export function uiShowCarStatus(status)
-{
-    textDisplayMotor.textContent = formatMotor(status);
-    textBluetoothBattery.textContent = formatBattery(status);
-    commandFlagsUpdate(status);
-
-    speedOverridden = Boolean(status && (status.flags & STATUS_FLAG.MAD_MAX));
-    speedRender();
+    textControlsHelp.append('Controls: ');
+    items.forEach((item, index) => {
+        const label = document.createElement('b');
+        label.textContent = item.label;
+        textControlsHelp.append(index > 0 ? ', ' : '', label, ' ' + item.text);
+    });
+    textControlsHelp.append('.');
 }
 
 /**

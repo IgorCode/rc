@@ -134,22 +134,13 @@ rc-app[data-active-screen=terminal] #command-toggle-terminal {
 
 
 /* Display */
-.display-wrapper {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  margin: 1em 1em 0;
-}
 .display {
   padding: .5em;
-  min-width: 4em;
+  min-width: 2em;
   background: var(--display-background);
   color: var(--display-color);
   text-align: center;
   user-select: none;
-}
-#display-direction {
-  min-width: 2em;
 }
 
 
@@ -189,8 +180,68 @@ app-screen > screen-contents {
   flex-direction: column;
   padding: 0;  /* TODO: maybe update */
 }
-#screen-main > screen-contents > .row {
-  flex-grow: 1;
+
+/* Controller: built from the car's manifest, equal columns and rows that fill the screen.
+   controls.js sets the grid template and each cell's grid-area. */
+controller-grid {
+  display: grid;
+  flex: 1;
+  gap: .6em;
+  padding: .6em;
+  min-height: 0;
+  box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
+}
+controller-grid > .cell {
+  margin: 0;
+  min-width: 0;
+  min-height: 0;
+  width: auto;
+  height: auto;
+  box-sizing: border-box;
+}
+controller-grid > .command {
+  font-size: 1.4em;
+  touch-action: manipulation;
+}
+controller-grid > .display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* The car marks risky controls (Mad Max) */
+controller-grid > .cell-danger {
+  border-bottom: 4px solid #d62839;
+}
+/* Another control overrides this one (Mad Max overrides the speed): dimmed but still usable */
+controller-grid > .cell-overridden:not(.command-speed-picker),
+.command-speed-picker.cell-overridden > .slider {
+  opacity: .4;
+}
+
+/* The controller is laid out for landscape (the installed app is locked to it) */
+.rotate-hint {
+  display: none;
+}
+@media screen and (orientation: portrait) {
+  #screen-main controller-grid {
+    display: none;
+  }
+  #screen-main .rotate-hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 1em;
+    height: 100%;
+    box-sizing: border-box;
+    color: var(--display-background);
+    font-size: 1.4em;
+    text-align: center;
+  }
 }
 /* .direction-wrapper {
   display: flex;
@@ -313,20 +364,38 @@ app-screen > screen-contents {
 .command-speed-picker {
   display: flex;
   flex-direction: row;
-  margin-bottom: 1em;
+  align-items: center;
+  gap: 1em;
 }
 .command-speed-picker > .display {
-  min-width: 2em;
-  margin-right: 1em;
+  flex: none;
+  min-width: 2.5em;
 }
-/* Mad Max drives at full speed: the selection is kept for later, so the slider stays usable but dimmed */
-.command-speed-picker.speed-overridden > .slider {
-  opacity: .4;
+.command-speed-picker > .slider {
+  flex: 1;
+  margin: 0;
+  min-width: 0;
+}
+/* Taller than wide: the selected level on top, the slider grows upwards */
+.command-speed-picker-vertical {
+  flex-direction: column;
+}
+.command-speed-picker-vertical > .slider {
+  min-height: 0;
+  width: 1em;
+  height: auto;
+  writing-mode: vertical-lr;
+  direction: rtl;
+}
+.command-speed-picker-vertical > .slider::-webkit-slider-thumb {
+  margin-top: 0;
+  margin-left: -.6em;
 }
 
 
 .command-direction {
   display: flex;
+  gap: .6em;
   -moz-user-select: none;
   -webkit-user-select: none;
   user-select: none;
@@ -334,6 +403,7 @@ app-screen > screen-contents {
 .command-direction > button {
   flex-grow: 1;
   position: relative;
+  padding: 0;
   /* margin: .5em; */
   background: var(--cmd-background);
   border: none;
@@ -351,64 +421,58 @@ app-screen > screen-contents {
   height: 0;
 }
 
-.command-direction-vertical {
+.command-direction-v {
   flex-direction: column;
-  margin: .5em 0 .5em 1em;
-  width: 10em;
-  /* height: 100%; */
 }
-.command-direction-vertical > button {
-  margin-top: .5em;
-  margin-bottom: .5em;
-  padding: 0;
-  /* touch-action: pan-y; */
+.command-direction-h {
+  flex-direction: row;
 }
-.command-direction-vertical > button:after {
+/* All four directions in one cell: a cross */
+.command-direction-both {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+.command-direction-both > .direction-forward {
+  grid-area: 1 / 2;
+}
+.command-direction-both > .direction-left {
+  grid-area: 2 / 1;
+}
+.command-direction-both > .direction-right {
+  grid-area: 2 / 3;
+}
+.command-direction-both > .direction-backward {
+  grid-area: 3 / 2;
+}
+.direction-forward:after,
+.direction-backward:after {
   border-left: 1.4em solid transparent;
   border-right: 1.4em solid transparent;
 }
-#command-direction-forward:after {
-  bottom: 1em;
-  border-bottom: 2em solid var(--cmd-color);
-}
-#command-direction-backward:after {
-  top: 1em;
-  border-top: 2em solid var(--cmd-color);
-}
-
-.command-direction-horizontal {
-  flex-direction: row;
-  margin-bottom: 1em;
-  width: 100%;
-  height: 7em;
-}
-.command-direction-horizontal > button {
-  margin-left: 7px;
-  margin-right: 7px;
-  padding: 0;
-  /* touch-action: pan-x; */
-}
-.command-direction-horizontal > button:after {
+.direction-left:after,
+.direction-right:after {
   border-top: 1.4em solid transparent;
   border-bottom: 1.4em solid transparent;
 }
-#command-direction-left:after {
+.direction-forward:after {
+  bottom: 1em;
+  border-bottom: 2em solid var(--cmd-color);
+}
+.direction-backward:after {
+  top: 1em;
+  border-top: 2em solid var(--cmd-color);
+}
+.direction-left:after {
   right: 1em;
   border-right: 2em solid var(--cmd-color);
 }
-#command-direction-right:after {
+.direction-right:after {
   left: 1em;
   border-left: 2em solid var(--cmd-color);
 }
 
 
-#commands {
-  display: flex;
-  flex-flow: row wrap;
-  justify-content: space-between;
-  margin-left: -7px;
-  margin-right: -7px;
-}
 .command {
   margin: 0 7px 1em;
   padding: .5em;
@@ -422,7 +486,7 @@ app-screen > screen-contents {
 .command:focus {
   outline: none;
 }
-/* Toggle state reported by the car (autopilot, lights, horn) */
+/* Toggle state reported by the car (autopilot, lights, horn, ...) */
 .command[aria-pressed=true] {
   background: var(--cmd-color-alt);
   box-shadow: inset 0 0 0 2px var(--cmd-color);

@@ -5,28 +5,48 @@
 import {CONNECTION_STATE, SCREEN} from './constants.js';
 import {addLogEntry, errorLogger, logInit} from './log.js';
 import {bluetoothEvents, bluetoothReset, bluetoothToggleConnection} from './bluetooth.js';
-import {controlsInit, controlsReset, controlsSetStatus} from './controls.js';
+import {controlsInit, controlsRender, controlsReset, controlsSetValues} from './controls.js';
+import {manifestValidate} from './manifest.js';
+import {MANIFEST_LEGACY} from './manifest-legacy.js';
 import {
     errorShow,
     screenShow,
     uiInit,
     uiSetConnectionState,
-    uiShowCarStatus,
+    uiShowBattery,
+    uiShowControlsHelp,
     uiShowDeviceName,
-    uiShowDistance,
     uiShowReceived,
     uiShowVersion,
 } from './ui.js';
 
 /**
- * Show the car status, null clears it and falls back to the last sent commands
- * @param {CarStatus|null} status
+ * Status values the car reported, by id. The status and distance characteristics each send their own.
+ * @type {{[key: string]: number|boolean|string}}
+ */
+let carValues = {};
+
+/**
+ * Show the car's status values, null clears them and the controls fall back to the last sent commands
+ * @param {{[key: string]: number|boolean|string}|null} values
  * @returns {void}
  */
-function statusApply(status)
+function valuesApply(values)
 {
-    controlsSetStatus(status);
-    uiShowCarStatus(status);
+    carValues = values ?? {};
+    controlsSetValues(carValues);
+    uiShowBattery(carValues);
+}
+
+/**
+ * Build the controller and the connect screen help from a manifest
+ * @param {Manifest} manifest
+ * @returns {void}
+ */
+function manifestApply(manifest)
+{
+    controlsRender(manifest);
+    uiShowControlsHelp(manifest);
 }
 
 /**
@@ -36,8 +56,7 @@ function statusApply(status)
 function carDataClear()
 {
     controlsReset();
-    statusApply(null);
-    uiShowDistance(null);
+    valuesApply(null);
     uiShowVersion(null);
 }
 
@@ -81,11 +100,11 @@ function bluetoothEventsBind()
     bluetoothEvents.addEventListener('version', (event) => {
         uiShowVersion(event.detail.version);
     });
-    bluetoothEvents.addEventListener('status', (event) => {
-        statusApply(event.detail.status);
+    bluetoothEvents.addEventListener('manifest', (event) => {
+        manifestApply(event.detail.manifest);
     });
-    bluetoothEvents.addEventListener('distance', (event) => {
-        uiShowDistance(event.detail.cm);
+    bluetoothEvents.addEventListener('values', (event) => {
+        valuesApply({...carValues, ...event.detail.values});
     });
     bluetoothEvents.addEventListener('receive', (event) => {
         uiShowReceived(event.detail.text);
@@ -107,6 +126,8 @@ function bluetoothEventsBind()
  */
 function init()
 {
+    // Until a car connects, show the layout of firmware without a manifest
+    manifestApply(manifestValidate(MANIFEST_LEGACY));
     reset();
 
 

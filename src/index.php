@@ -95,26 +95,12 @@
 
             <app-screen id="screen-main">
                 <screen-contents>
-<!-- <div class="display-wrapper grid-stack">
-    <div class="display grid-stack-item" id="display-direction"><div class="grid-stack-item-content">—</div></div>
-    <div class="display grid-stack-item" id="display-1"><div class="grid-stack-item-content">—</div></div>
-    <div class="display grid-stack-item" id="display-2"><div class="grid-stack-item-content">—</div></div>
-    <div class="display grid-stack-item" id="display-3"><div class="grid-stack-item-content">—</div></div>
-    <div class="display grid-stack-item" id="display-4"><div class="grid-stack-item-content">>—</div></div>
-</div> -->
+                    <!-- Built by controls.js from the car's manifest (grid + cells) -->
+                    <controller-grid id="controller"></controller-grid>
+                    <p class="rotate-hint">Turn the phone sideways to drive.</p>
 
-                    <div class="display-wrapper">
-                        <div class="display" id="display-direction">—</div>
-                        <div class="display" id="display-1">—</div>
-                        <div class="display" id="display-2">—</div>
-                    </div>
-
-                    <div class="row">
-                        <command-direction class="command-direction command-direction-vertical">
-                            <button id="command-direction-forward" aria-label="Direction forward"></button>
-                            <button id="command-direction-backward" aria-label="Direction backward"></button>
-                        </command-direction>
-                        <!-- <div class="column direction-wrapper">
+                    <!-- Kept for later: the joystick and placeholder buttons of the earlier hard-coded layout
+                        <div class="column direction-wrapper">
                             <div id="joystick">
                                 <div id="direction-marks">
                                     <div class="direction-section direction-section-1"></div>
@@ -126,55 +112,8 @@
 
                                 <div id="arrows"><div class="arrows-horizontal"></div></div>
                             </div>
-                        </div> -->
-                        <div class="column command-wrapper">
-                            <div class="command-speed-picker">
-                                <div class="display" id="display-speed"></div>
-                                <input type="range" value="1" min="1" max="10" step="1" class="slider" list="tickmarks" id="speed-picker" aria-label="Change speed" />
-                                <datalist id="tickmarks">
-                                    <option value="1" label="10%"></option>
-                                    <option value="2"></option>
-                                    <option value="3"></option>
-                                    <option value="4"></option>
-                                    <option value="5" label="50%"></option>
-                                    <option value="6"></option>
-                                    <option value="7"></option>
-                                    <option value="8"></option>
-                                    <option value="9"></option>
-                                    <option value="10" label="100%"></option>
-                                </datalist>
-                            </div>
-                            <div id="commands">
-                                <command-direction class="command-direction command-direction-horizontal">
-                                    <button id="command-direction-left" aria-label="Direction left"></button>
-                                    <button id="command-direction-right" aria-label="Direction right"></button>
-                                </command-direction>
-
-                                <button class="command" id="command-1" title="Autopilot" aria-label="Autopilot">A</button>
-                                <button class="command" id="command-2" title="Lights" aria-label="Lights">L</button>
-                                <button class="command" id="command-3" title="Horn (hold)" aria-label="Horn">H</button>
-                                <button class="command" id="command-obstacle-stop" title="Obstacle stop" aria-label="Obstacle stop">O</button>
-                                <button class="command" id="command-mad-max" title="Mad Max mode" aria-label="Mad Max mode">M</button>
-                                <input type="color" class="command command-type-rgb" id="command-4" value="#ffffff" />
-
-                                <!-- <button class="command todo" id="command-5">—</button>
-                                <button class="command todo" id="command-6">—</button>
-                                <button class="command todo" id="command-7">—</button>
-                                <button class="command todo" id="command-8">—</button>
-
-                                <button class="command todo" id="command-9">—</button>
-                                <button class="command todo" id="command-10">—</button>
-                                <button class="command todo" id="command-11">—</button>
-                                <button class="command todo" id="command-12">—</button> -->
-
-                                <!-- <button class="command todo" id="command-13">—</button>
-                                <button class="command todo" id="command-14">—</button>
-                                <button class="command todo" id="command-15">—</button>
-                                <button class="command todo" id="command-16">—</button> -->
-                                <!-- TODO: Work in progress -->
-                            </div>
                         </div>
-                    </div>
+                    -->
                 </screen-contents>
             </app-screen>
 
@@ -188,7 +127,9 @@
                             <li>A Bluetooth Low Energy (BLE) module in the car, such as HM-10 or ESP32. Classic Bluetooth modules (HC-05, HC-06) do not work.</li>
                             <li>Bluetooth turned on. On Android 11 and older, Location must be on too.</li>
                         </ul>
-                        <p>Controls: <b>A</b> autopilot, <b>L</b> lights, <b>H</b> horn (hold), <b>O</b> obstacle stop: the car stops by itself before hitting something in front. <b>M</b> Mad Max: full speed whatever speed is selected, no limits on turning and reversing, the autopilot does not slow down near obstacles, and the car honks when something comes within 40 cm. If the connection drops, the app reconnects to the same car automatically.</p>
+                        <p>Each car sends its own controller layout when it connects.</p>
+                        <p id="controls-help"></p>
+                        <p>If the connection drops, the app reconnects to the same car automatically.</p>
                     </div>
                     <div class="column">
                         <button id="connect">

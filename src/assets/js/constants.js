@@ -60,25 +60,8 @@ export const DRIVE_STATE = Object.freeze({
 });
 
 /**
- * Flag bits in the car status (byte 3 of the status characteristic)
- * @readonly
- * @enum {number}
- */
-export const STATUS_FLAG = Object.freeze({
-    AUTOPILOT: 0x01,
-    LIGHT_FRONT: 0x02,
-    LIGHT_REAR: 0x04,
-    HORN: 0x08,
-    // Forward safety stop for manual driving (car-black#28), on after boot
-    OBSTACLE_STOP: 0x10,
-    // Full speed, no turn/reverse caps, autopilot does not slow down near obstacles (car-black#25).
-    // Stays on after a disconnect. The cruise speed byte still holds the selected speed.
-    MAD_MAX: 0x20,
-});
-
-/**
- * Command letters sent to the car, by drive state or action.
- * Must match bluetoothMapCommands() in the car firmware (command.ino).
+ * Legacy drive command letters, by drive state. The command queue merges these until a manifest
+ * gives the car's own letters; the controls always send the letters from the manifest.
  * @readonly
  * @enum {string}
  */
@@ -92,17 +75,6 @@ export const COMMAND = Object.freeze({
     [DRIVE_STATE.BACKWARD_LEFT]:  'H',
     [DRIVE_STATE.LEFT]:           'L',
     [DRIVE_STATE.FORWARD_LEFT]:   'G',
-    'autopilot-on':               'X',
-    'autopilot-off':              'x',
-    'lights-on':                  'W',
-    'lights-off':                 'w',
-    'horn-on':                    'V',
-    'horn-off':                   'v',
-    'obstacle-stop-on':           'C',
-    'obstacle-stop-off':          'c',
-    'mad-max-on':                 'M',
-    'mad-max-off':                'm',
-    'command-4':                  '4',
 });
 
 export const
@@ -112,28 +84,22 @@ export const
     BT_CHARACTERISTIC_DISTANCE = 0xFFE2,
     BT_CHARACTERISTIC_STATUS = 0xFFE3,
     BT_CHARACTERISTIC_VERSION = 0xFFE4,
-    DISTANCE_MAX = 400,
-    STATUS_LENGTH = 7,
-    // Status drive state values (index) as DRIVE_STATE
-    STATUS_DRIVE_STATES = Object.freeze([
-        DRIVE_STATE.STOP,
-        DRIVE_STATE.FORWARD,
-        DRIVE_STATE.BACKWARD,
-        DRIVE_STATE.LEFT,
-        DRIVE_STATE.RIGHT,
-        DRIVE_STATE.FORWARD_LEFT,
-        DRIVE_STATE.FORWARD_RIGHT,
-        DRIVE_STATE.BACKWARD_LEFT,
-        DRIVE_STATE.BACKWARD_RIGHT,
-    ]),
-    // Motor PWM of the speed levels 1-10, as reported in the status cruise speed
-    CRUISE_SPEEDS = Object.freeze([60, 90, 110, 130, 150, 170, 190, 210, 230, 250]),
-    // Highest motor PWM the firmware uses, shown as 100%
-    MOTOR_PWM_MAX = 250,
+    // Car manifest (car-black#31): 8-byte header + JSON, read in pages (write a u16 LE offset, then read)
+    BT_CHARACTERISTIC_MANIFEST = 0xFFE5,
+    MANIFEST_HEADER_LENGTH = 8,
+    MANIFEST_SCHEMA_VERSION = 1,
+    // Largest grid the RC renders, in rows and in columns
+    MANIFEST_GRID_MAX = 12,
+    // Columns of the automatic layout used when the grid is invalid
+    MANIFEST_AUTO_COLUMNS = 6,
+    // localStorage key of the downloaded manifests, by CRC, and how many are kept
+    MANIFEST_CACHE_KEY = 'rc-manifest-cache',
+    MANIFEST_CACHE_SIZE = 5,
     // Do not move the speed picker from the car status this long after the user moved it (ms)
     SPEED_SYNC_HOLD = 1000,
     // Car watchdog (car-black#32): the car stops a manual drive this long after the last drive command,
-    // and the horn this long after the last V (ms)
+    // and a hold button (horn) this long after the last press command (ms). Defaults until the
+    // manifest's car.watchdog gives the car's own timeouts.
     WATCHDOG_DRIVE_TIMEOUT = 500,
     WATCHDOG_HORN_TIMEOUT = 1000,
     // While a direction or the horn is held, its command is resent this many times per watchdog timeout
