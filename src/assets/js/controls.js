@@ -377,7 +377,7 @@ console.log(event.buttons);
 
     /**
      * Obstacle stop toggle: the forward safety stop for manual driving (autopilot always keeps it).
-     * Needs car firmware 1.2.0+, older firmware ignores C / c.
+     * Needs the car firmware from car-black#28, older firmware ignores C / c.
      * @returns {void}
      */
     ctrlObstacleStop.addEventListener('click', () => {

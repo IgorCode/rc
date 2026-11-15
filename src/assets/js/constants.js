@@ -69,7 +69,7 @@ export const STATUS_FLAG = Object.freeze({
     LIGHT_FRONT: 0x02,
     LIGHT_REAR: 0x04,
     HORN: 0x08,
-    // Forward safety stop for manual driving (firmware 1.2.0+), on after boot
+    // Forward safety stop for manual driving (car-black#28), on after boot
     OBSTACLE_STOP: 0x10,
 });
 
