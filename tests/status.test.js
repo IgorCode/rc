@@ -43,6 +43,13 @@ describe('statusParse', () => {
         assert.equal(statusParse(dataView([0, 0, 60, 0, 0, 0])), null);
     });
 
+    it('keeps the obstacle stop flag (bit 4, firmware 1.2.0+)', () => {
+        const status = statusParse(dataView([0, 0, 60, STATUS_FLAG.OBSTACLE_STOP | STATUS_FLAG.HORN, 0, 0, 0]));
+        assert.equal(STATUS_FLAG.OBSTACLE_STOP, 0x10);
+        assert.equal(status.flags & STATUS_FLAG.OBSTACLE_STOP, STATUS_FLAG.OBSTACLE_STOP);
+        assert.equal(status.flags & STATUS_FLAG.AUTOPILOT, 0);
+    });
+
     it('ignores extra bytes', () => {
         assert.equal(statusParse(dataView([1, 60, 60, 0, 0, 0, 0, 99])).drive, DRIVE_STATE.FORWARD);
     });

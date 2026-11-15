@@ -19,6 +19,7 @@ let app = null,
     ctrlAutopilot = null,
     ctrlLights = null,
     ctrlHorn = null,
+    ctrlObstacleStop = null,
 
     // screens = {
     //     connect: document.getElementById('screen-connect'),
@@ -48,6 +49,7 @@ export function uiInit()
     ctrlAutopilot = document.getElementById('command-1');
     ctrlLights = document.getElementById('command-2');
     ctrlHorn = document.getElementById('command-3');
+    ctrlObstacleStop = document.getElementById('command-obstacle-stop');
 
     /**
      * Close error screen
@@ -236,7 +238,7 @@ function setPressed(el, pressed)
 }
 
 /**
- * Update the autopilot, lights and horn buttons from the car status flags
+ * Update the autopilot, lights, horn and obstacle stop buttons from the car status flags
  * @param {CarStatus|null} status
  * @returns {void}
  */
@@ -246,6 +248,7 @@ function commandFlagsUpdate(status)
         setPressed(ctrlAutopilot, null);
         setPressed(ctrlLights, null);
         setPressed(ctrlHorn, null);
+        setPressed(ctrlObstacleStop, null);
         return;
     }
 
@@ -253,6 +256,7 @@ function commandFlagsUpdate(status)
     setPressed(ctrlAutopilot, (flags & STATUS_FLAG.AUTOPILOT) !== 0);
     setPressed(ctrlLights, (flags & (STATUS_FLAG.LIGHT_FRONT | STATUS_FLAG.LIGHT_REAR)) !== 0);
     setPressed(ctrlHorn, (flags & STATUS_FLAG.HORN) !== 0);
+    setPressed(ctrlObstacleStop, (flags & STATUS_FLAG.OBSTACLE_STOP) !== 0);
 }
 
 /**
