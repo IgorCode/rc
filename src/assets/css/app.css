@@ -319,6 +319,10 @@ app-screen > screen-contents {
   min-width: 2em;
   margin-right: 1em;
 }
+/* Mad Max drives at full speed: the selection is kept for later, so the slider stays usable but dimmed */
+.command-speed-picker.speed-overridden > .slider {
+  opacity: .4;
+}
 
 
 .command-direction {

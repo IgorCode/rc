@@ -71,6 +71,9 @@ export const STATUS_FLAG = Object.freeze({
     HORN: 0x08,
     // Forward safety stop for manual driving (car-black#28), on after boot
     OBSTACLE_STOP: 0x10,
+    // Full speed, no turn/reverse caps, autopilot does not slow down near obstacles (car-black#25).
+    // Stays on after a disconnect. The cruise speed byte still holds the selected speed.
+    MAD_MAX: 0x20,
 });
 
 /**
@@ -97,6 +100,8 @@ export const COMMAND = Object.freeze({
     'horn-off':                   'v',
     'obstacle-stop-on':           'C',
     'obstacle-stop-off':          'c',
+    'mad-max-on':                 'M',
+    'mad-max-off':                'm',
     'command-4':                  '4',
 });
 

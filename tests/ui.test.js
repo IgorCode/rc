@@ -1,6 +1,6 @@
 import {describe, it} from 'node:test';
 import assert from 'node:assert/strict';
-import {formatBattery, formatDistance, formatMotor} from '../src/assets/js/ui.js';
+import {formatBattery, formatDistance, formatMotor, formatSpeed} from '../src/assets/js/ui.js';
 
 describe('formatDistance', () => {
     it('shows a dash without data', () => {
@@ -28,6 +28,17 @@ describe('formatMotor', () => {
         assert.equal(formatMotor({driveSpeed: 60}), '24%');
         assert.equal(formatMotor({driveSpeed: 125}), '50%');
         assert.equal(formatMotor({driveSpeed: 250}), '100%');
+    });
+});
+
+describe('formatSpeed', () => {
+    it('shows the selected level', () => {
+        assert.equal(formatSpeed(1, false), '1');
+        assert.equal(formatSpeed(10, false), '10');
+    });
+
+    it('shows MAX while Mad Max overrides the selection', () => {
+        assert.equal(formatSpeed(3, true), 'MAX');
     });
 });
 

@@ -16,6 +16,7 @@ const cache = {
     lights: false,
     // On after a car boot
     obstacleStop: true,
+    madMax: false,
 };
 
 const directionPressed = {
@@ -38,7 +39,8 @@ let carStatus = null,
     ctrlAutopilot = null,
     ctrlLights = null,
     ctrlHorn = null,
-    ctrlObstacleStop = null;
+    ctrlObstacleStop = null,
+    ctrlMadMax = null;
 
 /**
  * Returns a function, that, as long as it continues to be invoked, will not
@@ -211,7 +213,7 @@ function bindEvt(el, handleStart, handleEnd)
 /**
  * Whether a car toggle is on: the car status when known, otherwise the last state the app sent
  * @param {number} flagMask STATUS_FLAG bits, any of them set counts as on
- * @param {'autopilot'|'lights'|'obstacleStop'} cacheKey
+ * @param {'autopilot'|'lights'|'obstacleStop'|'madMax'} cacheKey
  * @returns {boolean}
  */
 function toggleIsOn(flagMask, cacheKey)
@@ -239,6 +241,7 @@ export function controlsInit()
     ctrlLights = document.getElementById('command-2');
     ctrlHorn = document.getElementById('command-3');
     ctrlObstacleStop = document.getElementById('command-obstacle-stop');
+    ctrlMadMax = document.getElementById('command-mad-max');
 
     ctrlSpeedPicker.addEventListener('input', () => {
         speedInputAt = Date.now();
@@ -383,6 +386,16 @@ console.log(event.buttons);
     ctrlObstacleStop.addEventListener('click', () => {
         cache.obstacleStop = !toggleIsOn(STATUS_FLAG.OBSTACLE_STOP, 'obstacleStop');
         bluetoothSendCommand(COMMAND[cache.obstacleStop ? 'obstacle-stop-on' : 'obstacle-stop-off']);
+    });
+
+    /**
+     * Mad Max toggle: full speed, no turn/reverse caps, autopilot does not slow down near obstacles.
+     * Needs the car firmware from car-black#25: older firmware treats M as unknown, which stops the car.
+     * @returns {void}
+     */
+    ctrlMadMax.addEventListener('click', () => {
+        cache.madMax = !toggleIsOn(STATUS_FLAG.MAD_MAX, 'madMax');
+        bluetoothSendCommand(COMMAND[cache.madMax ? 'mad-max-on' : 'mad-max-off']);
     });
     document.getElementById('command-4').addEventListener('input', (event) => {
         const hexColor = event.target.value;

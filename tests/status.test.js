@@ -50,6 +50,15 @@ describe('statusParse', () => {
         assert.equal(status.flags & STATUS_FLAG.AUTOPILOT, 0);
     });
 
+    it('keeps the Mad Max flag (bit 5) and the selected cruise speed', () => {
+        // Mad Max on, motor at full 250, but the selected speed (cruise byte) is still level 3
+        const status = statusParse(dataView([1, 250, 110, STATUS_FLAG.MAD_MAX | STATUS_FLAG.OBSTACLE_STOP, 0, 0, 0]));
+        assert.equal(STATUS_FLAG.MAD_MAX, 0x20);
+        assert.equal(status.flags & STATUS_FLAG.MAD_MAX, STATUS_FLAG.MAD_MAX);
+        assert.equal(status.driveSpeed, 250);
+        assert.equal(status.speed, 3);
+    });
+
     it('ignores extra bytes', () => {
         assert.equal(statusParse(dataView([1, 60, 60, 0, 0, 0, 0, 99])).drive, DRIVE_STATE.FORWARD);
     });
