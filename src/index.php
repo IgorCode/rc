@@ -7,7 +7,6 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <?php $dateCSS = date('YmdHis', filemtime('assets/css/app.css')); ?>
     <link rel="stylesheet" href="/assets/css/app-<?= $dateCSS; ?>.css" />
-    <!-- <link rel="stylesheet" href="/assets/vendor/gridstack.js/1.1.1/gridstack.min.css" /> -->
     <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
     <link rel="dns-prefetch" href="https://www.google-analytics.com" />
 
@@ -166,7 +165,6 @@
     </rc-app>
 
     <!-- <script src="/assets/vendor/nipplejs/0.8.5/nipplejs.min.js"></script> -->
-    <!-- <script src="/assets/vendor/gridstack.js/1.1.1/gridstack.min.js"></script> -->
     <?php
     // Cache busting for ES modules: imports use plain URLs (./bluetooth.js), so the import map
     // sends each one to its timestamped URL, which .htaccess rewrites back to the real file
