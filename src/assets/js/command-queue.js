@@ -22,10 +22,24 @@ import {COMMAND, DRIVE_STATE} from './constants.js';
  *     resolves once it (or the command it was merged into) is written or dropped
  * @property {function(): void} clear Drop all pending commands, for example after a disconnect
  * @property {function(): number} size Number of pending commands, not counting the one in flight
+ * @property {function(CommandGroups): void} setGroups Merge by the commands of the connected car's manifest
  */
 
-// Command letters of the drive states (S F I R J B H L G)
-const DRIVE_COMMANDS = new Set(Object.values(DRIVE_STATE).map(state => COMMAND[state]));
+/**
+ * Commands that are merged with each other: drive states and speed keys
+ * @typedef {object} CommandGroups
+ * @property {Set<string>} drive
+ * @property {Set<string>} speed
+ */
+
+/**
+ * Defaults until a manifest sets the groups: the legacy drive letters (S F I R J B H L G) and speed digits
+ * @type {CommandGroups}
+ */
+const DEFAULT_GROUPS = Object.freeze({
+    drive: new Set(Object.values(DRIVE_STATE).map(state => COMMAND[state])),
+    speed: new Set(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']),
+});
 
 /**
  * Merge group of a command. A pending command of the same group is replaced by the newer one,
@@ -33,17 +47,18 @@ const DRIVE_COMMANDS = new Set(Object.values(DRIVE_STATE).map(state => COMMAND[s
  * so it is never dropped: it can only be replaced by a newer drive state.
  * @param {string} cmd
  * @param {number|string|object|undefined} data
+ * @param {CommandGroups} [groups] Drive and speed commands, from the manifest
  * @returns {string|null} null when the command is not merged with other commands
  */
-export function commandGroup(cmd, data)
+export function commandGroup(cmd, data, groups = DEFAULT_GROUPS)
 {
     if (data !== undefined) {
         return 'data:' + cmd;
     }
-    if (DRIVE_COMMANDS.has(cmd)) {
+    if (groups.drive.has(cmd)) {
         return 'drive';
     }
-    if (/^[0-9]$/.test(cmd)) {
+    if (groups.speed.has(cmd)) {
         return 'speed';
     }
     return null;
@@ -55,14 +70,15 @@ export function commandGroup(cmd, data)
  * pending is not added twice (toggle on / off are different commands, so both stay).
  * @param {QueuedCommand[]} queue Pending commands, changed in place
  * @param {QueuedCommand} entry
+ * @param {CommandGroups} [groups] Drive and speed commands, from the manifest
  * @returns {QueuedCommand} The entry the command ended up in, a pending one when it was merged
  */
-export function commandQueueAdd(queue, entry)
+export function commandQueueAdd(queue, entry, groups = DEFAULT_GROUPS)
 {
-    const group = commandGroup(entry.cmd, entry.data);
+    const group = commandGroup(entry.cmd, entry.data, groups);
     const pending = queue.find((item) => {
         if (group !== null) {
-            return commandGroup(item.cmd, item.data) === group;
+            return commandGroup(item.cmd, item.data, groups) === group;
         }
         return item.cmd === entry.cmd && item.data === undefined && entry.data === undefined;
     });
@@ -88,7 +104,8 @@ export function commandQueueAdd(queue, entry)
 export function commandQueueCreate(write, onError)
 {
     const queue = [];
-    let busy = false;
+    let busy = false,
+        groups = DEFAULT_GROUPS;
 
     /**
      * Write the pending commands one after another, unless that is already running
@@ -117,7 +134,7 @@ export function commandQueueCreate(write, onError)
     return {
         add(cmd, data, log) {
             return new Promise((resolve) => {
-                commandQueueAdd(queue, {cmd, data, log, done: [resolve]});
+                commandQueueAdd(queue, {cmd, data, log, done: [resolve]}, groups);
                 drain();
             });
         },
@@ -126,6 +143,9 @@ export function commandQueueCreate(write, onError)
         },
         size() {
             return queue.length;
+        },
+        setGroups(newGroups) {
+            groups = newGroups;
         },
     };
 }

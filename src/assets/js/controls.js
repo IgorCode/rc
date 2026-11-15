@@ -1,55 +1,78 @@
 /* globals nipplejs:false */
 /**
- * Driving controls: direction pad, speed picker, autopilot / lights / horn toggles, color picker
- * and the terminal's custom command. Keeps what the app sent (`cache`) and what the car reports
- * (`carStatus`), because the car can change state on its own.
+ * The controller: builds the main screen from the car's manifest (grid + cells), binds the
+ * controls and shows the status values in them. Keeps what the app sent (drive state, speed,
+ * toggle state) and what the car reports (`values`), because the car can change state on its own.
+ * Nothing touches the DOM on import: controlsInit() and controlsRender() do.
  */
-import {
-    COMMAND,
-    DRIVE_STATE,
-    KEEPALIVE_RESENDS,
-    SPEED_SYNC_HOLD,
-    STATUS_FLAG,
-    WATCHDOG_DRIVE_TIMEOUT,
-    WATCHDOG_HORN_TIMEOUT,
-} from './constants.js';
+import {DRIVE_STATE, KEEPALIVE_RESENDS, SPEED_SYNC_HOLD} from './constants.js';
 import {bluetoothSendCommand} from './bluetooth.js';
-import {uiShowDirection, uiShowSpeed} from './ui.js';
+import {driveCommand, manifestDpads, speedIndexFromPwm, speedLevels} from './manifest.js';
+import {formatSpeed, formatStatusValue} from './ui.js';
 
-const cache = {
-    speed: 1,
-    drive: DRIVE_STATE.STOP,
-    // Last toggle state the app sent, only used when the car does not report its status
-    autopilot: false,
-    lights: false,
-    // On after a car boot
-    obstacleStop: true,
-    madMax: false,
-};
+/**
+ * A d-pad: one or more dpad cells with the same id, sharing one drive state
+ * @typedef {object} Dpad
+ * @property {string} id
+ * @property {{[key: string]: string}} cmd Drive state -> command, merged from its cells
+ * @property {{forward: boolean, backward: boolean, left: boolean, right: boolean}} pressed
+ * @property {DriveStateType} drive Last drive state sent
+ * @property {{start: function(): void, stop: function(): void, isRunning: function(): boolean}} keepalive
+ */
 
-const directionPressed = {
-    forward: false,
-    right: false,
-    backward: false,
-    left: false
-};
+/**
+ * A hold button (horn): sends `press` while held, repeated as keepalive, and `release` once
+ * @typedef {object} Hold
+ * @property {ManifestCell} cell
+ * @property {boolean} held
+ * @property {{start: function(): void, stop: function(): void, isRunning: function(): boolean}} keepalive
+ */
 
-/** @type {CarStatus|null} */
-let carStatus = null,
-    hornHeld = false,
-    speedInputAt = 0,
+/**
+ * The speed picker
+ * @typedef {object} Speed
+ * @property {ManifestCell} cell
+ * @property {Array<{key: string, pwm: number}>} levels Slowest first
+ * @property {number} index Selected level, index into levels
+ * @property {string} sentKey Key of the level the car has, so it is not sent again
+ * @property {number} inputAt When the user last moved the picker (ms)
+ * @property {HTMLInputElement} input
+ * @property {HTMLElement} display
+ */
+
+/**
+ * A rendered cell
+ * @typedef {object} RenderedCell
+ * @property {ManifestCell} cell
+ * @property {HTMLElement} el
+ * @property {function(): void} [update] Shows the current values
+ */
+
+// Directions of the d-pad buttons, by axis
+const DPAD_BUTTONS = Object.freeze({
+    v: ['forward', 'backward'],
+    h: ['left', 'right'],
+    both: ['forward', 'left', 'right', 'backward'],
+});
+
+// Last toggle state the app sent, by cell key. Only used when the car does not report the status.
+const sent = {};
+
+let container = null,
     inputCustomCommand = null,
     // ctrlJoystick = null,
-    ctrlDirectionForward = null,
-    ctrlDirectionBackward = null,
-    ctrlDirectionLeft = null,
-    ctrlDirectionRight = null,
-    ctrlSpeedPicker = null,
-    ctrlAutopilot = null,
-    ctrlLights = null,
-    ctrlHorn = null,
-    ctrlObstacleStop = null,
-    ctrlMadMax = null;
+    /** @type {Manifest|null} */
+    manifest = null,
+    /** @type {{[key: string]: number|boolean|string}} Status values by id, empty when unknown */
+    values = {},
+    /** @type {RenderedCell[]} */
+    rendered = [],
+    /** @type {Map<string, Dpad>} By id */
+    dpads = new Map(),
+    /** @type {Hold[]} */
+    holds = [],
+    /** @type {Speed|null} */
+    speed = null;
 
 /**
  * Returns a function, that, as long as it continues to be invoked, will not
@@ -121,152 +144,6 @@ export function keepaliveCreate(send, period)
     };
 }
 
-// Resend the held drive state. Autopilot is exempt from the watchdog and overrides manual drive anyway.
-// Repeats are not logged: they would add about 6 terminal entries per second.
-const driveKeepalive = keepaliveCreate(() => {
-    if (cache.drive !== DRIVE_STATE.STOP && !toggleIsOn(STATUS_FLAG.AUTOPILOT, 'autopilot')) {
-        bluetoothSendCommand(COMMAND[cache.drive], undefined, false);
-    }
-}, keepalivePeriod(WATCHDOG_DRIVE_TIMEOUT));
-
-// Resend V while the horn is held. A repeated V keeps the tone going, it does not restart it.
-const hornKeepalive = keepaliveCreate(() => {
-    bluetoothSendCommand(COMMAND['horn-on'], undefined, false);
-}, keepalivePeriod(WATCHDOG_HORN_TIMEOUT));
-
-/**
- * Show the direction: the car's status when known, otherwise the last sent drive state.
- * The car can change state on its own (safety stop, failsafe, autopilot), so its status wins.
- * @returns {void}
- */
-function textDirectionUpdate()
-{
-    uiShowDirection(carStatus ? carStatus.drive : cache.drive);
-}
-
-/**
- * Update speed text
- * @returns {void}
- */
-function textSpeedUpdate()
-{
-    uiShowSpeed(cache.speed);
-}
-
-/**
- * Store the car status, null clears it and falls back to the last sent commands
- * @param {CarStatus|null} status
- * @returns {void}
- */
-export function controlsSetStatus(status)
-{
-    carStatus = status;
-
-    // Follow the car's selected speed, unless the user is moving the picker right now
-    if (status && status.speed !== cache.speed && Date.now() - speedInputAt >= SPEED_SYNC_HOLD) {
-        cache.speed = status.speed;
-        ctrlSpeedPicker.value = status.speed;
-    }
-
-    textDirectionUpdate();
-    textSpeedUpdate();
-}
-
-/**
- * Forget the toggle state that depends on the connection
- * @returns {void}
- */
-export function controlsReset()
-{
-    // The firmware failsafe turns autopilot off when the controller disconnects
-    cache.autopilot = false;
-    // A held button must be pressed again after a reconnect, so the car does not drive off on its own
-    controlsReleaseAll();
-}
-
-/**
- * Release all held controls (directions and horn): sends the stop and horn-off commands
- * and stops their keepalive
- * @returns {void}
- */
-export function controlsReleaseAll()
-{
-    directionPressed.forward = false;
-    directionPressed.backward = false;
-    directionPressed.left = false;
-    directionPressed.right = false;
-    directionCalculator();
-    hornRelease();
-}
-
-/**
- * Horn pressed: sound it and keep it alive while held
- * @returns {void}
- */
-function hornPress()
-{
-    hornHeld = true;
-    bluetoothSendCommand(COMMAND['horn-on']);
-    hornKeepalive.start();
-}
-
-/**
- * Horn released: stop repeating V and send v, which stops the horn right away. If v is lost, the
- * car's watchdog still stops the horn WATCHDOG_HORN_TIMEOUT after the last V.
- * Does nothing when the horn is not held, because several events can end one hold.
- * @returns {void}
- */
-function hornRelease()
-{
-    if (!hornHeld) {
-        return;
-    }
-    hornHeld = false;
-    hornKeepalive.stop();
-    bluetoothSendCommand(COMMAND['horn-off']);
-}
-
-/**
- * Speed update event 1-10 (10 is sent as 0)
- * NOTE: Must not use immediate debounce because we would not be getting the last value
- * @returns {void}
- */
-const cmdUpdateSpeedDebounced = debounce(function () {
-    let command = parseInt(ctrlSpeedPicker.value, 10);
-    if (cache.speed !== command) {
-        cache.speed = command;
-
-        command = command.toString();
-        if (command === '10') {
-            command = '0';
-        }
-        bluetoothSendCommand(command);
-
-        textSpeedUpdate();
-    }
-}, 150, false);
-
-/**
- * Set drive state
- * @param {DriveStateType} state
- * @returns {void}
- */
-function setDriveState(state)
-{
-    if (cache.drive !== state) {
-        cache.drive = state;
-        bluetoothSendCommand(COMMAND[state]);
-
-        textDirectionUpdate();
-    }
-
-    if (state === DRIVE_STATE.STOP) {
-        driveKeepalive.stop();
-    } else {
-        driveKeepalive.start();
-    }
-}
-
 /**
  * Combine the pressed direction buttons into a drive state, for example forward + right gives FR.
  * Forward wins over backward and left wins over right.
@@ -297,17 +174,6 @@ export function directionFromPressed(pressed)
 }
 
 /**
- * Send the drive state of the currently pressed direction buttons
- * @returns {DriveStateType}
- */
-function directionCalculator()
-{
-    const direction = directionFromPressed(directionPressed);
-    setDriveState(direction);
-    return direction;
-}
-
-/**
  * Bind press and release handlers to a hold button. The pointer is captured, so a finger or mouse
  * that slides off the button still releases it. The release handler can run more than once for
  * one press (pointerup, then lostpointercapture), so it must not depend on running once.
@@ -332,42 +198,580 @@ function bindEvt(el, handleStart, handleEnd)
 }
 
 /**
- * Whether a car toggle is on: the car status when known, otherwise the last state the app sent
- * @param {number} flagMask STATUS_FLAG bits, any of them set counts as on
- * @param {'autopilot'|'lights'|'obstacleStop'|'madMax'} cacheKey
- * @returns {boolean}
+ * Send a command to the car
+ * @param {string} cmd
+ * @param {number|string|object} [data] Payload
+ * @param {boolean} [log] Write it to the terminal log, false for keepalive repeats
+ * @returns {void}
  */
-function toggleIsOn(flagMask, cacheKey)
+function send(cmd, data, log = true)
 {
-    if (carStatus) {
-        return (carStatus.flags & flagMask) !== 0;
-    }
-    return cache[cacheKey];
+    bluetoothSendCommand(cmd, data, log);
 }
 
 /**
- * Find the elements and bind all controls
+ * Status descriptor by id, a bare one when the manifest does not list it
+ * @param {string} id
+ * @returns {StatusDescriptor}
+ */
+function statusDescriptor(id)
+{
+    return (manifest && manifest.status.find(descriptor => descriptor.id === id)) || {id};
+}
+
+/**
+ * Whether a toggle is on: its status when the car reports it, otherwise the last state the app sent
+ * @param {ManifestCell} cell
+ * @returns {boolean}
+ */
+function toggleIsOn(cell)
+{
+    if (cell.status && typeof values[cell.status] === 'boolean') {
+        return values[cell.status];
+    }
+    return sent[cell.key] ?? false;
+}
+
+/**
+ * Whether the toggle with a well-known id is on, false when the car has no such toggle
+ * @param {string} id
+ * @returns {boolean}
+ */
+function toggleIsOnById(id)
+{
+    const item = rendered.find(entry => entry.cell.type === 'toggle' && entry.cell.id === id);
+    return item ? toggleIsOn(item.cell) : false;
+}
+
+/**
+ * Set the pressed state of a button, null means unknown
+ * @param {HTMLElement} el
+ * @param {boolean|null} pressed
+ * @returns {void}
+ */
+function setPressed(el, pressed)
+{
+    if (pressed === null) {
+        el.removeAttribute('aria-pressed');
+    } else {
+        el.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+    }
+}
+
+/**
+ * Show the cell's label on a button: its icon from the app sprite when it names one, otherwise the label
+ * @param {HTMLElement} el
+ * @param {ManifestCell} cell
+ * @returns {void}
+ */
+function labelSet(el, cell)
+{
+    // Only plain names, the icon goes into a URL
+    if (typeof cell.icon === 'string' && /^[a-z0-9-]+$/i.test(cell.icon)) {
+        const svgNs = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNs, 'svg');
+        const use = document.createElementNS(svgNs, 'use');
+        svg.setAttribute('class', 'icon');
+        use.setAttribute('href', '/assets/img/app-icons.svg?#' + cell.icon);
+        svg.append(use);
+        el.append(svg);
+    } else {
+        el.textContent = cell.label ?? cell.key;
+    }
+}
+
+/**
+ * Create a button for a cell, with its title and aria label
+ * @param {ManifestCell} cell
+ * @returns {HTMLButtonElement}
+ */
+function buttonCreate(cell)
+{
+    const el = document.createElement('button');
+    el.className = 'command';
+    labelSet(el, cell);
+    return el;
+}
+
+/**
+ * Drive state of a d-pad from its pressed buttons, sent when it changed. The keepalive repeats it
+ * while a direction is held.
+ * @param {Dpad} dpad
+ * @returns {void}
+ */
+function dpadUpdate(dpad)
+{
+    const state = directionFromPressed(dpad.pressed);
+    if (dpad.drive !== state) {
+        dpad.drive = state;
+        const cmd = driveCommand(dpad.cmd, state);
+        if (cmd !== null) {
+            send(cmd);
+        }
+        displaysUpdate();
+    }
+
+    if (state === DRIVE_STATE.STOP) {
+        dpad.keepalive.stop();
+    } else {
+        dpad.keepalive.start();
+    }
+}
+
+/**
+ * Create a d-pad, or return the one its id already has
+ * @param {ManifestCell} cell
+ * @returns {Dpad}
+ */
+function dpadGet(cell)
+{
+    const id = cell.id ?? cell.key;
+    if (dpads.has(id)) {
+        return dpads.get(id);
+    }
+
+    const dpad = {
+        id,
+        cmd: manifestDpads(manifest.cells).get(id).cmd,
+        pressed: {forward: false, backward: false, left: false, right: false},
+        drive: DRIVE_STATE.STOP,
+        keepalive: null,
+    };
+    // Resend the held drive state. Autopilot is exempt from the watchdog and overrides manual drive anyway.
+    // Repeats are not logged: they would add about 6 terminal entries per second.
+    dpad.keepalive = keepaliveCreate(() => {
+        const cmd = driveCommand(dpad.cmd, dpad.drive);
+        if (dpad.drive !== DRIVE_STATE.STOP && cmd !== null && !toggleIsOnById('autopilot')) {
+            send(cmd, undefined, false);
+        }
+    }, keepalivePeriod(manifest.car.watchdog.drive));
+    dpads.set(id, dpad);
+    return dpad;
+}
+
+/**
+ * Direction pad cell: forward / back (axis v), left / right (h) or all four (both)
+ * @param {ManifestCell} cell
+ * @returns {RenderedCell}
+ */
+function dpadCreate(cell)
+{
+    const dpad = dpadGet(cell);
+    const axis = cell.axis ?? 'both';
+    const el = document.createElement('command-direction');
+    el.className = 'command-direction command-direction-' + axis;
+
+    DPAD_BUTTONS[axis].forEach((direction) => {
+        const button = document.createElement('button');
+        button.className = 'direction-' + direction;
+        button.setAttribute('aria-label', 'Direction ' + direction);
+        bindEvt(button, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dpad.pressed[direction] = true;
+            dpadUpdate(dpad);
+        }, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dpad.pressed[direction] = false;
+            dpadUpdate(dpad);
+        });
+        el.append(button);
+    });
+
+    return {cell, el};
+}
+
+/**
+ * Hold pressed: send `press` and keep it alive while held
+ * @param {Hold} hold
+ * @returns {void}
+ */
+function holdPress(hold)
+{
+    hold.held = true;
+    send(hold.cell.press);
+    hold.keepalive.start();
+}
+
+/**
+ * Hold released: stop repeating `press` and send `release`, which stops it right away (the horn).
+ * If it is lost, or there is none, the car's watchdog stops it after the last `press`.
+ * Does nothing when not held, because several events can end one hold.
+ * @param {Hold} hold
+ * @returns {void}
+ */
+function holdRelease(hold)
+{
+    if (!hold.held) {
+        return;
+    }
+    hold.held = false;
+    hold.keepalive.stop();
+    if (hold.cell.release) {
+        send(hold.cell.release);
+    }
+}
+
+/**
+ * Hold button cell (horn). Its pressed state shows the status with the same id (the car is honking).
+ * @param {ManifestCell} cell
+ * @returns {RenderedCell}
+ */
+function holdCreate(cell)
+{
+    const el = buttonCreate(cell);
+    const hold = {cell, held: false, keepalive: null};
+    // A repeated press keeps the horn going, it does not restart it
+    hold.keepalive = keepaliveCreate(() => {
+        send(cell.press, undefined, false);
+    }, keepalivePeriod(manifest.car.watchdog.horn));
+    holds.push(hold);
+
+    bindEvt(el, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        holdPress(hold);
+    }, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        holdRelease(hold);
+    });
+
+    return {
+        cell,
+        el,
+        update: () => setPressed(el, cell.id && typeof values[cell.id] === 'boolean' ? values[cell.id] : null),
+    };
+}
+
+/**
+ * Toggle cell: sends `on` or `off`, picked from the car status (or the last sent state without it)
+ * @param {ManifestCell} cell
+ * @returns {RenderedCell}
+ */
+function toggleCreate(cell)
+{
+    const el = buttonCreate(cell);
+    el.addEventListener('click', () => {
+        sent[cell.key] = !toggleIsOn(cell);
+        send(sent[cell.key] ? cell.on : cell.off);
+        valuesUpdate();
+    });
+
+    return {
+        cell,
+        el,
+        update: () => setPressed(el, cell.status && typeof values[cell.status] === 'boolean' ? values[cell.status] : null),
+    };
+}
+
+/**
+ * Button cell: sends its command on click
+ * @param {ManifestCell} cell
+ * @returns {RenderedCell}
+ */
+function buttonCellCreate(cell)
+{
+    const el = buttonCreate(cell);
+    el.addEventListener('click', () => send(cell.cmd));
+    return {cell, el};
+}
+
+/**
+ * Color cell: sends `cmd=` + the 3 RGB bytes
+ * @param {ManifestCell} cell
+ * @returns {RenderedCell}
+ */
+function colorCreate(cell)
+{
+    const el = document.createElement('input');
+    el.type = 'color';
+    el.className = 'command command-type-rgb';
+    el.value = '#ffffff';
+    el.addEventListener('input', () => {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(el.value);
+        if (result) {
+            send(cell.cmd, [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)]);
+        }
+    });
+    return {cell, el};
+}
+
+/**
+ * Text of a display cell. The direction falls back to the last sent drive state without a status.
+ * @param {ManifestCell} cell
+ * @returns {string}
+ */
+function displayText(cell)
+{
+    let value = values[cell.status];
+    if (value === undefined && cell.status === 'drive') {
+        const dpad = dpads.get('drive') ?? dpads.values().next().value;
+        value = dpad ? dpad.drive : undefined;
+    }
+    return formatStatusValue(statusDescriptor(cell.status), value);
+}
+
+/**
+ * Display cell: shows one status value
+ * @param {ManifestCell} cell
+ * @returns {RenderedCell}
+ */
+function displayCreate(cell)
+{
+    const el = document.createElement('div');
+    el.className = 'display';
+    return {cell, el, update: () => {
+        el.textContent = displayText(cell);
+    }};
+}
+
+/**
+ * Show the selected speed, MAX while another control overrides it (Mad Max). The picker stays
+ * usable: the car stores the selection and uses it once the override is off.
+ * @param {boolean} overridden
+ * @returns {void}
+ */
+function speedRender(overridden)
+{
+    speed.display.textContent = formatSpeed(speed.index + 1, overridden);
+}
+
+/**
+ * Speed cell: the selected level and a slider over the levels of `keys`, slowest first
+ * @param {ManifestCell} cell
+ * @returns {RenderedCell}
+ */
+function speedCreate(cell)
+{
+    const el = document.createElement('div');
+    el.className = 'command-speed-picker';
+
+    const display = document.createElement('div');
+    display.className = 'display';
+
+    const levels = speedLevels(cell.keys);
+    const ticks = document.createElement('datalist');
+    ticks.id = 'speed-ticks-' + cell.key;
+    levels.forEach((level, index) => {
+        const option = document.createElement('option');
+        option.value = String(index + 1);
+        ticks.append(option);
+    });
+
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.className = 'slider';
+    input.min = '1';
+    input.max = String(levels.length);
+    input.step = '1';
+    input.value = '1';
+    input.setAttribute('list', ticks.id);
+    input.setAttribute('aria-label', cell.title ?? 'Change speed');
+
+    speed = {cell, levels, index: 0, sentKey: levels[0].key, inputAt: 0, input, display};
+
+    // NOTE: Must not use immediate debounce because we would not be getting the last value
+    const speedSend = debounce(() => {
+        speed.index = parseInt(input.value, 10) - 1;
+        const key = levels[speed.index].key;
+        if (key !== speed.sentKey) {
+            speed.sentKey = key;
+            send(key);
+        }
+        valuesUpdate();
+    }, 150, false);
+    input.addEventListener('input', () => {
+        speed.inputAt = Date.now();
+        speedSend();
+    });
+
+    el.append(display, input, ticks);
+    return {cell, el};
+}
+
+/**
+ * Follow the car's selected speed (the cruise status), unless the user is moving the picker right now
+ * @returns {void}
+ */
+function speedSync()
+{
+    if (!speed || typeof values.cruise !== 'number' || Date.now() - speed.inputAt < SPEED_SYNC_HOLD) {
+        return;
+    }
+    const index = speedIndexFromPwm(speed.levels, values.cruise);
+    if (index !== speed.index) {
+        speed.index = index;
+        speed.sentKey = speed.levels[index].key;
+        speed.input.value = String(index + 1);
+    }
+}
+
+/**
+ * Create the element of a cell by its type
+ * @param {ManifestCell} cell
+ * @returns {RenderedCell}
+ */
+function cellCreate(cell)
+{
+    switch (cell.type) {
+        case 'button':
+            return buttonCellCreate(cell);
+        case 'hold':
+            return holdCreate(cell);
+        case 'toggle':
+            return toggleCreate(cell);
+        case 'dpad':
+            return dpadCreate(cell);
+        case 'speed':
+            return speedCreate(cell);
+        case 'display':
+            return displayCreate(cell);
+        case 'color':
+            return colorCreate(cell);
+        default:
+            // manifestValidate() drops unknown types
+            throw new Error('Unknown cell type ' + cell.type);
+    }
+}
+
+/**
+ * Update the display cells
+ * @returns {void}
+ */
+function displaysUpdate()
+{
+    rendered.filter(item => item.cell.type === 'display').forEach(item => item.update());
+}
+
+/**
+ * Show the values in all cells: displays, pressed state, the selected speed and the overrides
+ * (while an `overrides` toggle is on, its target is dimmed, and a speed target shows MAX)
+ * @returns {void}
+ */
+function valuesUpdate()
+{
+    speedSync();
+
+    const overridden = new Set(rendered
+        .filter(item => item.cell.type === 'toggle' && item.cell.overrides && toggleIsOn(item.cell))
+        .map(item => item.cell.overrides));
+
+    rendered.forEach((item) => {
+        if (item.update) {
+            item.update();
+        }
+        item.el.classList.toggle('cell-overridden', item.cell.id !== undefined && overridden.has(item.cell.id));
+    });
+
+    if (speed) {
+        speedRender(speed.cell.id !== undefined && overridden.has(speed.cell.id));
+    }
+}
+
+/**
+ * Store the car's status values and show them
+ * @param {{[key: string]: number|boolean|string}|null} newValues By status id, null clears them
+ *     (the cells fall back to the last sent commands)
+ * @returns {void}
+ */
+export function controlsSetValues(newValues)
+{
+    values = newValues ?? {};
+    valuesUpdate();
+}
+
+/**
+ * Release all held controls (directions and holds): sends the stop and release commands
+ * and stops their keepalive
+ * @returns {void}
+ */
+export function controlsReleaseAll()
+{
+    dpads.forEach((dpad) => {
+        dpad.pressed.forward = false;
+        dpad.pressed.backward = false;
+        dpad.pressed.left = false;
+        dpad.pressed.right = false;
+        dpadUpdate(dpad);
+    });
+    holds.forEach(holdRelease);
+}
+
+/**
+ * Forget the toggle state that depends on the connection
+ * @returns {void}
+ */
+export function controlsReset()
+{
+    // The firmware failsafe turns autopilot off when the controller disconnects
+    rendered.filter(item => item.cell.type === 'toggle' && item.cell.id === 'autopilot').forEach((item) => {
+        sent[item.cell.key] = false;
+    });
+    // A held button must be pressed again after a reconnect, so the car does not drive off on its own
+    controlsReleaseAll();
+}
+
+/**
+ * Build the controller from a manifest: a CSS grid of equal columns and rows that fills the screen,
+ * each cell placed on its grid area. Only numbers go into the CSS, never the car's strings.
+ * Replaces the previous controller, releasing what it held.
+ * @param {Manifest} newManifest
+ * @returns {void}
+ */
+export function controlsRender(newManifest)
+{
+    // A reconnect to the same car keeps the controller as it is (speed selection, sent toggles)
+    if (manifest && JSON.stringify(newManifest) === JSON.stringify(manifest)) {
+        return;
+    }
+
+    controlsReleaseAll();
+    dpads.forEach(dpad => dpad.keepalive.stop());
+
+    manifest = newManifest;
+    rendered = [];
+    dpads = new Map();
+    holds = [];
+    speed = null;
+    Object.keys(sent).forEach(key => delete sent[key]);
+
+    const layout = manifest.layout;
+    container.replaceChildren();
+    container.style.gridTemplateColumns = 'repeat(' + layout.columns + ', minmax(0, 1fr))';
+    container.style.gridTemplateRows = 'repeat(' + layout.rows + ', minmax(0, 1fr))';
+
+    layout.areas.forEach((area) => {
+        const cell = manifest.cells[area.key];
+        const item = cellCreate(cell);
+        item.el.classList.add('cell', 'cell-' + cell.type);
+        item.el.classList.toggle('cell-danger', cell.danger === true);
+        // A speed cell taller than wide gets a vertical slider
+        item.el.classList.toggle('command-speed-picker-vertical', cell.type === 'speed' && area.rowSpan > area.columnSpan);
+        item.el.style.gridArea = area.row + ' / ' + area.column + ' / span ' + area.rowSpan + ' / span ' + area.columnSpan;
+        if (cell.title) {
+            item.el.title = cell.title;
+            if (cell.type !== 'dpad' && cell.type !== 'speed') {
+                item.el.setAttribute('aria-label', cell.title);
+            }
+        }
+        rendered.push(item);
+        container.append(item.el);
+    });
+
+    valuesUpdate();
+}
+
+/**
+ * Find the elements and bind what does not depend on the manifest
  * @returns {void}
  */
 export function controlsInit()
 {
+    container = document.getElementById('controller');
     inputCustomCommand = document.getElementById('app-custom-command');
     // ctrlJoystick = document.getElementById('joystick');
-    ctrlDirectionForward = document.getElementById('command-direction-forward');
-    ctrlDirectionBackward = document.getElementById('command-direction-backward');
-    ctrlDirectionLeft = document.getElementById('command-direction-left');
-    ctrlDirectionRight = document.getElementById('command-direction-right');
-    ctrlSpeedPicker = document.getElementById('speed-picker');
-    ctrlAutopilot = document.getElementById('command-1');
-    ctrlLights = document.getElementById('command-2');
-    ctrlHorn = document.getElementById('command-3');
-    ctrlObstacleStop = document.getElementById('command-obstacle-stop');
-    ctrlMadMax = document.getElementById('command-mad-max');
-
-    ctrlSpeedPicker.addEventListener('input', () => {
-        speedInputAt = Date.now();
-    });
-    ctrlSpeedPicker.addEventListener('input', cmdUpdateSpeedDebounced);
 
     /**
      * Send a custom message
@@ -401,104 +805,6 @@ console.log(event.buttons);
     });
 */
 
-    bindEvt(ctrlDirectionLeft, function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        directionPressed.left = true;
-        // errorLogger('start');
-        console.log('start', e, directionCalculator());
-    }, function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        directionPressed.left = false;
-        // errorLogger('end');
-        console.log('end', e, directionCalculator());
-    });
-    bindEvt(ctrlDirectionRight, function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        directionPressed.right = true;
-        // errorLogger('start');
-        console.log('start', e, directionCalculator());
-    }, function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        directionPressed.right = false;
-        // errorLogger('end');
-        console.log('end', e, directionCalculator());
-    });
-    bindEvt(ctrlDirectionForward, function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        directionPressed.forward = true;
-        // errorLogger('start');
-        console.log('start', e, directionCalculator());
-    }, function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        directionPressed.forward = false;
-        // errorLogger('end');
-        console.log('end', e, directionCalculator());
-    });
-    bindEvt(ctrlDirectionBackward, function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        directionPressed.backward = true;
-        // errorLogger('start');
-        console.log('start', e, directionCalculator());
-    }, function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        directionPressed.backward = false;
-        // errorLogger('end');
-        console.log('end', e, directionCalculator());
-    });
-
-
-    /**
-     * Handle commands
-     * @returns {void}
-     */
-    document.getElementById('commands').addEventListener('click', (event) => {
-        // Only buttons with a direct mapping, the toggles and direction buttons have their own handlers
-        if (event.target.id in COMMAND) {
-            bluetoothSendCommand(COMMAND[event.target.id]);
-        }
-    });
-
-    /**
-     * Autopilot toggle
-     * @returns {void}
-     */
-    ctrlAutopilot.addEventListener('click', () => {
-        cache.autopilot = !toggleIsOn(STATUS_FLAG.AUTOPILOT, 'autopilot');
-        bluetoothSendCommand(COMMAND[cache.autopilot ? 'autopilot-on' : 'autopilot-off']);
-    });
-
-    /**
-     * Lights toggle (front and rear switch together in the firmware)
-     * @returns {void}
-     */
-    ctrlLights.addEventListener('click', () => {
-        cache.lights = !toggleIsOn(STATUS_FLAG.LIGHT_FRONT | STATUS_FLAG.LIGHT_REAR, 'lights');
-        bluetoothSendCommand(COMMAND[cache.lights ? 'lights-on' : 'lights-off']);
-    });
-
-    /**
-     * Horn sounds while the button is held: V is repeated while held (watchdog keepalive),
-     * and v on release stops it.
-     * @returns {void}
-     */
-    bindEvt(ctrlHorn, function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        hornPress();
-    }, function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        hornRelease();
-    });
-
     /**
      * Release everything when the app loses focus or is hidden: the release events may never
      * arrive, the keepalive would keep the car driving, and hidden tabs throttle the timers.
@@ -508,39 +814,6 @@ console.log(event.buttons);
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
             controlsReleaseAll();
-        }
-    });
-
-    /**
-     * Obstacle stop toggle: the forward safety stop for manual driving (autopilot always keeps it).
-     * Needs the car firmware from car-black#28, older firmware ignores C / c.
-     * @returns {void}
-     */
-    ctrlObstacleStop.addEventListener('click', () => {
-        cache.obstacleStop = !toggleIsOn(STATUS_FLAG.OBSTACLE_STOP, 'obstacleStop');
-        bluetoothSendCommand(COMMAND[cache.obstacleStop ? 'obstacle-stop-on' : 'obstacle-stop-off']);
-    });
-
-    /**
-     * Mad Max toggle: full speed, no turn/reverse caps, autopilot does not slow down near obstacles.
-     * Needs the car firmware from car-black#25: older firmware treats M as unknown, which stops the car.
-     * @returns {void}
-     */
-    ctrlMadMax.addEventListener('click', () => {
-        cache.madMax = !toggleIsOn(STATUS_FLAG.MAD_MAX, 'madMax');
-        bluetoothSendCommand(COMMAND[cache.madMax ? 'mad-max-on' : 'mad-max-off']);
-    });
-    document.getElementById('command-4').addEventListener('input', (event) => {
-        const hexColor = event.target.value;
-
-        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hexColor);
-        if (result) {
-            const data = [
-                parseInt(result[1], 16),
-                parseInt(result[2], 16),
-                parseInt(result[3], 16)
-            ];
-            bluetoothSendCommand(COMMAND[event.target.id], data);
         }
     });
 

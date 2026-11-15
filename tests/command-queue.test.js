@@ -57,6 +57,15 @@ describe('commandGroup', () => {
             assert.equal(commandGroup(cmd), null, cmd);
         }
     });
+
+    it('uses the drive letters and speed keys of the manifest when given', () => {
+        const groups = {drive: new Set(['u', 'd', '_']), speed: new Set(['a', 'b'])};
+        assert.equal(commandGroup('u', undefined, groups), 'drive');
+        assert.equal(commandGroup('_', undefined, groups), 'drive');
+        assert.equal(commandGroup('b', undefined, groups), 'speed');
+        assert.equal(commandGroup('F', undefined, groups), null);
+        assert.equal(commandGroup('1', undefined, groups), null);
+    });
 });
 
 describe('commandQueueAdd', () => {
@@ -96,6 +105,20 @@ describe('commandQueueAdd', () => {
 });
 
 describe('commandQueueCreate', () => {
+    it('merges by the groups set with setGroups()', async () => {
+        const writer = controlledWriter();
+        const queue = commandQueueCreate(item => writer.write(item), assert.fail);
+        queue.setGroups({drive: new Set(['u', 'd', '_']), speed: new Set()});
+
+        queue.add('u', undefined, true);
+        queue.add('d', undefined, true);
+        queue.add('_', undefined, true);
+
+        await writer.release();
+        await writer.release();
+        assert.deepEqual(writer.written, ['u', '_']);
+    });
+
     it('writes one command at a time, in order', async () => {
         const writer = controlledWriter();
         const queue = commandQueueCreate(item => writer.write(item), assert.fail);

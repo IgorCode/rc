@@ -6,6 +6,7 @@
 import {
     BT_CHARACTERISTIC_COMMAND,
     BT_CHARACTERISTIC_DISTANCE,
+    BT_CHARACTERISTIC_MANIFEST,
     BT_CHARACTERISTIC_STATUS,
     BT_CHARACTERISTIC_VERSION,
     BT_CONNECTION_TIMEOUT,
@@ -15,15 +16,25 @@ import {
 } from './constants.js';
 import {addLogEntry, errorLogger} from './log.js';
 import {commandQueueCreate} from './command-queue.js';
-import {distanceParse, statusParse, versionParse} from './status.js';
+import {
+    manifestCacheCreate,
+    manifestCommandGroups,
+    manifestDownload,
+    manifestValidate,
+    statusDecode,
+} from './manifest.js';
+import {MANIFEST_LEGACY} from './manifest-legacy.js';
+import {versionParse} from './status.js';
 
 /**
  * Bluetooth events. All are CustomEvents with the payload in `detail`:
  * - `state` {state: ConnectionStateType}: the connection state changed
  * - `device` {name: string|null}: a device was picked, null after a reset
  * - `version` {version: string|null}: firmware version, null when disconnected
- * - `status` {status: CarStatus}: car status received
- * - `distance` {cm: number}: front distance received
+ * - `manifest` {manifest: Manifest}: the car's manifest, or the legacy one for older firmware.
+ *   Fired while connecting, before `state: connected`, so the controls are ready first.
+ * - `values` {values: {[key: string]: number|boolean|string}}: status values by id, decoded with the
+ *   manifest. Each event has the values of one characteristic (status or distance).
  * - `receive` {text: string}: data received on the command characteristic
  * - `disconnected` {manual: boolean}: the device disconnected. An unexpected disconnect reconnects on its own.
  * - `error` {error: Error|string}: connecting failed
@@ -35,6 +46,8 @@ let bluetoothDevice = null,
     bluetoothCharacteristic = null,
     bluetoothDistanceCharacteristic = null,
     bluetoothStatusCharacteristic = null,
+    /** @type {Manifest|null} Decodes the status values */
+    bluetoothManifest = null,
     isManualDisconnect = false;
 
 // Commands wait here while a write is in flight, see command-queue.js
@@ -73,6 +86,7 @@ export function bluetoothReset()
     bluetoothCharacteristic = null;
     bluetoothDistanceCharacteristic = null;
     bluetoothStatusCharacteristic = null;
+    bluetoothManifest = null;
     commandQueue.clear();
     isManualDisconnect = false;
 }
@@ -153,14 +167,41 @@ function bluetoothCharacteristicValueChanged(event)
 }
 
 /**
- * Receive front distance via Bluetooth (uint16 little-endian, cm)
+ * Short UUID of a characteristic as the manifest names it (`src`), for example ffe3
+ * @param {number} uuid
+ * @returns {string}
+ */
+function shortUuid(uuid)
+{
+    return uuid.toString(16).toLowerCase();
+}
+
+/**
+ * Decode a characteristic value with the manifest and fire the values
+ * @param {number} uuid Characteristic UUID
+ * @param {DataView} value
+ * @returns {void}
+ */
+function valuesEmit(uuid, value)
+{
+    if (!bluetoothManifest) {
+        return;
+    }
+    const values = statusDecode(bluetoothManifest.status, shortUuid(uuid), value);
+    if (Object.keys(values).length > 0) {
+        emit('values', {values});
+    }
+}
+
+/**
+ * Receive front distance via Bluetooth
  * NOTE: Notified about every 200 ms, so it is not written to the terminal log
  * @param {object} event
  * @returns {void}
  */
 function bluetoothDistanceValueChanged(event)
 {
-    emit('distance', {cm: distanceParse(event.target.value)});
+    valuesEmit(BT_CHARACTERISTIC_DISTANCE, event.target.value);
 }
 
 /**
@@ -176,8 +217,7 @@ async function bluetoothDistanceStart(service)
         characteristic.addEventListener('characteristicvaluechanged', bluetoothDistanceValueChanged);
         bluetoothDistanceCharacteristic = characteristic;
 
-        const initial = await characteristic.readValue();
-        emit('distance', {cm: distanceParse(initial)});
+        valuesEmit(BT_CHARACTERISTIC_DISTANCE, await characteristic.readValue());
 
         await characteristic.startNotifications();
         addLogEntry('Distance notifications started');
@@ -194,12 +234,7 @@ async function bluetoothDistanceStart(service)
  */
 function bluetoothStatusValueChanged(event)
 {
-    const status = statusParse(event.target.value);
-    if (status) {
-        emit('status', {status});
-    } else {
-        errorLogger('Invalid car status length: ' + event.target.value.byteLength);
-    }
+    valuesEmit(BT_CHARACTERISTIC_STATUS, event.target.value);
 }
 
 /**
@@ -215,10 +250,7 @@ async function bluetoothStatusStart(service)
         characteristic.addEventListener('characteristicvaluechanged', bluetoothStatusValueChanged);
         bluetoothStatusCharacteristic = characteristic;
 
-        const status = statusParse(await characteristic.readValue());
-        if (status) {
-            emit('status', {status});
-        }
+        valuesEmit(BT_CHARACTERISTIC_STATUS, await characteristic.readValue());
 
         await characteristic.startNotifications();
         addLogEntry('Status notifications started');
@@ -244,6 +276,53 @@ async function bluetoothVersionRead(service)
     } catch (error) {
         errorLogger('Firmware version not available: ' + error);
     }
+}
+
+/**
+ * localStorage, or null where it is blocked (accessing it can throw)
+ * @returns {Storage|null}
+ */
+function storageGet()
+{
+    try {
+        return globalThis.localStorage ?? null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Load the car's manifest (car-black#31): page 0, then the rest unless its CRC is cached.
+ * Firmware without the manifest characteristic, or a manifest that can not be used, gets the
+ * built-in legacy manifest, so a failure is logged and does not fail the connection.
+ * @param {BluetoothRemoteGATTService} service
+ * @returns {Promise<Manifest>}
+ */
+async function bluetoothManifestLoad(service)
+{
+    let manifest;
+    try {
+        const characteristic = await service.getCharacteristic(BT_CHARACTERISTIC_MANIFEST);
+        let pages = 0;
+        const result = await manifestDownload(async (offset) => {
+            // Page 0 needs no offset write, the car resets the offset on connect
+            if (offset > 0) {
+                await characteristic.writeValue(new Uint8Array([offset & 0xFF, offset >> 8]));
+            }
+            pages++;
+            const value = await characteristic.readValue();
+            return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+        }, manifestCacheCreate(storageGet()));
+
+        manifest = manifestValidate(JSON.parse(result.text));
+        addLogEntry('Manifest ' + (result.cached ? 'from cache' : 'downloaded') + ', ' + pages + ' page(s) read');
+    } catch (error) {
+        errorLogger('Car manifest not available, using the built-in layout: ' + error);
+        manifest = manifestValidate(MANIFEST_LEGACY);
+    }
+
+    manifest.warnings.forEach(warning => addLogEntry('Manifest: ' + warning));
+    return manifest;
 }
 
 /**
@@ -304,6 +383,12 @@ export async function bluetoothConnect()
         } else {
             addLogEntry('Characteristic does not support notifications');
         }
+
+        // Before any control is live: the controls and the status decoding come from it, and its
+        // pages never interleave with command writes
+        bluetoothManifest = await bluetoothManifestLoad(service);
+        commandQueue.setGroups(manifestCommandGroups(bluetoothManifest));
+        emit('manifest', {manifest: bluetoothManifest});
 
         bluetoothCharacteristic = characteristic;
         emit('state', {state: CONNECTION_STATE.CONNECTED});
