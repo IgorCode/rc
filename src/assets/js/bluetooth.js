@@ -14,6 +14,7 @@ import {
     LOG_TYPE,
 } from './constants.js';
 import {addLogEntry, errorLogger} from './log.js';
+import {commandQueueCreate} from './command-queue.js';
 import {distanceParse, statusParse, versionParse} from './status.js';
 
 /**
@@ -34,9 +35,10 @@ let bluetoothDevice = null,
     bluetoothCharacteristic = null,
     bluetoothDistanceCharacteristic = null,
     bluetoothStatusCharacteristic = null,
-    bluetoothBusy = false,
-    commandQueue = [],
     isManualDisconnect = false;
+
+// Commands wait here while a write is in flight, see command-queue.js
+const commandQueue = commandQueueCreate(commandWrite, errorLogger);
 
 /**
  * Fire a Bluetooth event
@@ -71,7 +73,7 @@ export function bluetoothReset()
     bluetoothCharacteristic = null;
     bluetoothDistanceCharacteristic = null;
     bluetoothStatusCharacteristic = null;
-    bluetoothBusy = false;
+    commandQueue.clear();
     isManualDisconnect = false;
 }
 
@@ -102,37 +104,40 @@ export function encodeCommand(cmd, data)
 }
 
 /**
- * Send a command to the Bluetooth
- * @param {string} cmd
- * @param {number|string|object} data
+ * Write one queued command to the command characteristic
+ * @param {QueuedCommand} entry
  * @returns {Promise<void>}
  */
-export function bluetoothSendCommand(cmd, data)
+async function commandWrite(entry)
 {
-    if (!bluetoothCharacteristic || bluetoothBusy) {
-        // TODO: if busy send later
-        // commandQueue.push({cmd, data});
+    // Disconnected while the command was waiting
+    const characteristic = bluetoothCharacteristic;
+    if (!characteristic) {
+        return;
+    }
+
+    await characteristic.writeValue(encodeCommand(entry.cmd, entry.data));
+    if (entry.log) {
+        addLogEntry(entry.cmd, LOG_TYPE.SEND);
+    }
+}
+
+/**
+ * Send a command to the car. While another write is in flight the command waits in the queue,
+ * where a newer drive state, speed or payload replaces a pending one (see command-queue.js).
+ * Without a connection the command is dropped.
+ * @param {string} cmd
+ * @param {number|string|object} [data] Payload, sent as `cmd=<data>;`
+ * @param {boolean} [log] Write it to the terminal log, false for keepalive repeats
+ * @returns {Promise<void>} Resolves once the command is written or dropped
+ */
+export function bluetoothSendCommand(cmd, data, log = true)
+{
+    if (!bluetoothCharacteristic) {
         return Promise.resolve();
     }
 
-    bluetoothBusy = true;
-
-    const sendArray = encodeCommand(cmd, data);
-console.log(sendArray);
-    return bluetoothCharacteristic.writeValue(sendArray)
-        .then(() => {
-            addLogEntry(cmd, LOG_TYPE.SEND);
-            // if (commandQueue.length > 0) {
-            //     const next = commandQueue.shift();
-            //     return bluetoothSendCommand(next.cmd, next.data);
-            // }
-        })
-        .catch(error => {
-            errorLogger(error);
-        })
-        .finally(() => {
-            bluetoothBusy = false;
-        });
+    return commandQueue.add(cmd, data, log);
 }
 
 /**
@@ -428,6 +433,7 @@ function bluetoothOnDisconnected()
         bluetoothStatusCharacteristic.removeEventListener('characteristicvaluechanged', bluetoothStatusValueChanged);
         bluetoothStatusCharacteristic = null;
     }
+    commandQueue.clear();
 
     addLogEntry('Bluetooth device disconnected');
 

@@ -1,7 +1,44 @@
-import {describe, it} from 'node:test';
+import {describe, it, mock} from 'node:test';
 import assert from 'node:assert/strict';
-import {directionFromPressed} from '../src/assets/js/controls.js';
-import {COMMAND} from '../src/assets/js/constants.js';
+import {directionFromPressed, keepaliveCreate, keepalivePeriod} from '../src/assets/js/controls.js';
+import {COMMAND, WATCHDOG_DRIVE_TIMEOUT, WATCHDOG_HORN_TIMEOUT} from '../src/assets/js/constants.js';
+
+describe('keepalivePeriod', () => {
+    it('resends several times within the watchdog timeout', () => {
+        assert.equal(keepalivePeriod(WATCHDOG_DRIVE_TIMEOUT), 166);
+        assert.equal(keepalivePeriod(WATCHDOG_HORN_TIMEOUT), 333);
+    });
+});
+
+describe('keepaliveCreate', () => {
+    it('sends every period between start and stop', (t) => {
+        t.mock.timers.enable({apis: ['setInterval']});
+        const send = mock.fn();
+        const keepalive = keepaliveCreate(send, 100);
+
+        keepalive.start();
+        assert.equal(keepalive.isRunning(), true);
+        t.mock.timers.tick(350);
+        assert.equal(send.mock.callCount(), 3);
+
+        keepalive.stop();
+        assert.equal(keepalive.isRunning(), false);
+        t.mock.timers.tick(500);
+        assert.equal(send.mock.callCount(), 3);
+    });
+
+    it('does not start a second timer when started again', (t) => {
+        t.mock.timers.enable({apis: ['setInterval']});
+        const send = mock.fn();
+        const keepalive = keepaliveCreate(send, 100);
+
+        keepalive.start();
+        keepalive.start();
+        t.mock.timers.tick(100);
+        assert.equal(send.mock.callCount(), 1);
+        keepalive.stop();
+    });
+});
 
 describe('directionFromPressed', () => {
     const cases = [
