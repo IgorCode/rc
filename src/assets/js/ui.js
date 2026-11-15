@@ -20,6 +20,11 @@ let app = null,
     ctrlLights = null,
     ctrlHorn = null,
     ctrlObstacleStop = null,
+    ctrlMadMax = null,
+    speedPicker = null,
+    // Last selected speed level, and whether Mad Max overrides it (the car then drives at full speed)
+    speedLevel = 1,
+    speedOverridden = false,
 
     // screens = {
     //     connect: document.getElementById('screen-connect'),
@@ -50,6 +55,8 @@ export function uiInit()
     ctrlLights = document.getElementById('command-2');
     ctrlHorn = document.getElementById('command-3');
     ctrlObstacleStop = document.getElementById('command-obstacle-stop');
+    ctrlMadMax = document.getElementById('command-mad-max');
+    speedPicker = document.querySelector('.command-speed-picker');
 
     /**
      * Close error screen
@@ -161,13 +168,36 @@ export function uiShowDirection(drive)
 }
 
 /**
+ * Format the speed display
+ * @param {number} level Selected speed level 1-10
+ * @param {boolean} overridden Mad Max is on, so the car drives at full speed whatever is selected
+ * @returns {string}
+ */
+export function formatSpeed(level, overridden)
+{
+    return overridden ? 'MAX' : String(level);
+}
+
+/**
+ * Show the speed display, and dim the speed picker while Mad Max overrides it.
+ * The picker stays usable: the car stores the selection and uses it once Mad Max is off.
+ * @returns {void}
+ */
+function speedRender()
+{
+    textDisplaySpeed.textContent = formatSpeed(speedLevel, speedOverridden);
+    speedPicker.classList.toggle('speed-overridden', speedOverridden);
+}
+
+/**
  * Update speed text
  * @param {number} level Speed level 1-10
  * @returns {void}
  */
 export function uiShowSpeed(level)
 {
-    textDisplaySpeed.textContent = level;
+    speedLevel = level;
+    speedRender();
 }
 
 /**
@@ -238,7 +268,7 @@ function setPressed(el, pressed)
 }
 
 /**
- * Update the autopilot, lights, horn and obstacle stop buttons from the car status flags
+ * Update the autopilot, lights, horn, obstacle stop and Mad Max buttons from the car status flags
  * @param {CarStatus|null} status
  * @returns {void}
  */
@@ -249,6 +279,7 @@ function commandFlagsUpdate(status)
         setPressed(ctrlLights, null);
         setPressed(ctrlHorn, null);
         setPressed(ctrlObstacleStop, null);
+        setPressed(ctrlMadMax, null);
         return;
     }
 
@@ -257,11 +288,13 @@ function commandFlagsUpdate(status)
     setPressed(ctrlLights, (flags & (STATUS_FLAG.LIGHT_FRONT | STATUS_FLAG.LIGHT_REAR)) !== 0);
     setPressed(ctrlHorn, (flags & STATUS_FLAG.HORN) !== 0);
     setPressed(ctrlObstacleStop, (flags & STATUS_FLAG.OBSTACLE_STOP) !== 0);
+    setPressed(ctrlMadMax, (flags & STATUS_FLAG.MAD_MAX) !== 0);
 }
 
 /**
- * Show the parts of the car status that only the car knows: motor speed, battery and toggle flags.
- * Direction and speed are shown by controls.js, which falls back to the last sent commands.
+ * Show the parts of the car status that only the car knows: motor speed, battery, toggle flags
+ * and the Mad Max speed override. Direction and the selected speed are shown by controls.js,
+ * which falls back to the last sent commands.
  * @param {CarStatus|null} status null clears it
  * @returns {void}
  */
@@ -270,6 +303,9 @@ export function uiShowCarStatus(status)
     textDisplayMotor.textContent = formatMotor(status);
     textBluetoothBattery.textContent = formatBattery(status);
     commandFlagsUpdate(status);
+
+    speedOverridden = Boolean(status && (status.flags & STATUS_FLAG.MAD_MAX));
+    speedRender();
 }
 
 /**

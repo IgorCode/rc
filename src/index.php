@@ -154,6 +154,7 @@
                                 <button class="command" id="command-2" title="Lights" aria-label="Lights">L</button>
                                 <button class="command" id="command-3" title="Horn (hold)" aria-label="Horn">H</button>
                                 <button class="command" id="command-obstacle-stop" title="Obstacle stop" aria-label="Obstacle stop">O</button>
+                                <button class="command" id="command-mad-max" title="Mad Max mode" aria-label="Mad Max mode">M</button>
                                 <input type="color" class="command command-type-rgb" id="command-4" value="#ffffff" />
 
                                 <!-- <button class="command todo" id="command-5">—</button>
@@ -187,7 +188,7 @@
                             <li>A Bluetooth Low Energy (BLE) module in the car, such as HM-10 or ESP32. Classic Bluetooth modules (HC-05, HC-06) do not work.</li>
                             <li>Bluetooth turned on. On Android 11 and older, Location must be on too.</li>
                         </ul>
-                        <p>Controls: <b>A</b> autopilot, <b>L</b> lights, <b>H</b> horn (hold), <b>O</b> obstacle stop: the car stops by itself before hitting something in front. If the connection drops, the app reconnects to the same car automatically.</p>
+                        <p>Controls: <b>A</b> autopilot, <b>L</b> lights, <b>H</b> horn (hold), <b>O</b> obstacle stop: the car stops by itself before hitting something in front. <b>M</b> Mad Max: full speed whatever speed is selected, no limits on turning and reversing, the autopilot does not slow down near obstacles, and the car honks when something comes within 40 cm. If the connection drops, the app reconnects to the same car automatically.</p>
                     </div>
                     <div class="column">
                         <button id="connect">
